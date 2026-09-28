@@ -98,9 +98,19 @@ bar positions. Similarity runs from 0 to 1 and measures shared onsets. A common
 backbeat can score highly; that isn't proof of copying. The comparison doesn't
 recognize every transformation, including half-time or double-time rewrites.
 
+Next to `report.json`, each candidate gets `<candidate>.evaluation.json` with
+the technical findings and raw metrics. Findings have three levels. An `error`
+blocks the candidate: a brief mismatch, an excluded family, an empty part, a kit
+role with no pitch and no fallback, a duplicate trigger, a velocity the shared
+rule can't fix, or MIDI that doesn't read back. A `warning` asks for a listen:
+more than two hands or two feet on one step, or eight or more bars that never
+change. An `info` finding records measurements and kit fallbacks, such as a
+rimshot played on the plain snare. There's no score, and a sparse part isn't
+penalized for having few notes.
+
 All valid candidates remain available, including the wildcard. Similarity
 doesn't remove a candidate or select a winner. Explicit exclusions still apply
-to every candidate. The simultaneous-hand warning is a rough review prompt,
+to every candidate. The hands-and-feet warning is a rough review prompt,
 not a complete test of whether a drummer could play the part.
 
 Audition the candidates through the same verified kit and routing. When live

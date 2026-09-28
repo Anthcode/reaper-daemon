@@ -20,7 +20,7 @@ Stan zweryfikowany w kodzie (baseline):
 | Warsztat przyjmuje 1–64 takty | `drum_workshop.parse` | Dłuższy utwór wymaga decyzji (§3.1) |
 | Manifest akceptuje tylko `fresh/contrast/wildcard` lub `fresh/reference/wildcard` i `version == 1` | `drum_workshop.load_workspace` | Nowe role wymagają manifestu v2 |
 | Brief ma zamkniętą listę pól; `exclude_families` jest globalne | `drum_workshop.validate_brief` | Nowe pola i zakazy per sekcja wymagają zmiany schematu |
-| Rola bez mapowania i bez fallbacku jest **po cichu pomijana** | `groovekit.render` → `pitch_for` zwraca `None` | Realna luka; kontrola mapowania to pierwsza nowa bramka |
+| Rola bez mapowania i bez fallbacku jest **po cichu pomijana** | `groovekit.render` → `pitch_for` zwraca `None` | Od PR 2: `build()` zwraca `unmapped_roles` i `fallback_roles`, ewaluacja daje `error`, `groovegen` ostrzega |
 | `build()` ustawia na sztywno `humanize: 20` i nie przekazuje parametrów wykonania, choć `render()` przyjmuje `kick_vel_max`, `kick_vel_min`, `kick_run_band` | `groovekit.build` | Performer profile = przekazanie parametrów, nie nowy humanizer |
 | `insert_groove` renderuje DSL od nowa (inny seed, bez warsztatowego `enforce()` i przycinania) | `reaperd.render_groove` | Do REAPER-a trafiłaby inna partia niż odsłuchana |
 | Istnieje `insert_midi_file` | `reaper_mcp.py` | Zapis zamrożonego `.mid` z ewaluacji |
@@ -243,7 +243,7 @@ Zadania:
 | PR | Zakres | Zależność | Kryterium ukończenia |
 |---|---|---|---|
 | 1 | Baseline, schemat planu, fixtures | Brak | Zrobione: 657 testów przechodzi, manifest v1 bez zmian; poprawka Golden Rule między sekcjami |
-| 2 | `evaluate.py` + kontrola mapowania | PR 1 | Wykrywa naruszenia z fixtures, nie blokuje poprawnych |
+| 2 | `evaluate.py` + kontrola mapowania | PR 1 | Zrobione: MIDI z warsztatu identyczne bajt po bajcie jak przed wydzieleniem; nowe bramki: mapowanie, sekcje planu, zakazy per sekcja, kończyny, powtarzalność, kick–riff |
 | 3 | `arrangement.py` (plan offline) | PR 1 | Plan deterministyczny, walidacja 4/4 i ≤ 64 taktów |
 | 4 | Manifest v2 + żądania z planem + granice sekcji | PR 2, PR 3 | 3 kandydatury z wildcardem zgodne z planem |
 | 5 | Fille, `build(params=...)`, profile, rewizje, zapis `.mid` | PR 4 | Zapisane nuty = odsłuchany plik; brak profilu = dotychczasowe MIDI |

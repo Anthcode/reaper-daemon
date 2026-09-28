@@ -215,3 +215,34 @@ def test_aliases_cannot_create_duplicate_physical_hits(tmp_path):
     (workspace/'fresh/candidate.dsl').write_text(dsl(cymbal='crash') + 'crash_r | X.......x....... |\n')
     report = workshop.evaluate(workspace)
     assert 'Duplicate' in report['candidates'][0]['error']
+
+
+def test_technical_report_is_written_next_to_each_candidate(tmp_path):
+    workspace = tmp_path/'workshop'
+    workshop.prepare(brief(), workspace)
+    populate(workspace)
+    (workspace/'wildcard/candidate.dsl').write_text(dsl(cymbal='ride'))
+    report = workshop.evaluate(workspace)
+    fresh = workshop.read_json(report['candidates'][0]['evaluation'])
+    assert fresh['candidate_id'] == 'fresh' and fresh['version'] == 1
+    assert {f['level'] for f in fresh['findings']} <= {'warning', 'info'}
+    assert fresh['metrics']['length_bars'] == 4
+    wildcard = workshop.read_json(report['candidates'][2]['evaluation'])
+    assert wildcard['summary'][0].startswith('ERROR: Excluded families')
+    assert not report['candidates'][2]['valid']
+
+
+def test_unmapped_roles_fail_the_candidate_instead_of_vanishing(tmp_path, monkeypatch):
+    real = workshop.groovekit.load_maps
+    sparse = {'Sparse Kit': {'KICK_R': 36, 'SNARE': 38, 'CRASH_R': 49}}
+    monkeypatch.setattr(workshop.groovekit, 'load_maps', lambda: {**real(), **sparse})
+    workspace = tmp_path/'workshop'
+    workshop.prepare(brief(map='Sparse Kit', exclude_families=[]), workspace)
+    populate(workspace)
+    for name in ('fresh', 'contrast', 'wildcard'):
+        path = workspace/name/'candidate.dsl'
+        path.write_text(path.read_text().replace('RS Monarch', 'Sparse Kit'))
+    report = workshop.evaluate(workspace)
+    # crash_l falls back to CRASH_R; the wildcard's china has nowhere to go.
+    assert report['audition_candidates'] == ['fresh', 'contrast']
+    assert 'cannot play' in report['candidates'][2]['error']

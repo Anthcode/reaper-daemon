@@ -1,7 +1,8 @@
 """Compatibility contract for the arrangement work (docs/drum-arrangement-plan.md).
 
 Later PRs add a plan, manifest v2 and richer reports. These tests pin what a
-v1 workshop reads and writes today so those additions stay optional.
+v1 workshop reads and writes so those additions stay optional: inputs gain no
+required fields, and outputs keep every v1 key (new keys may be added).
 """
 import json
 
@@ -36,7 +37,9 @@ def test_v1_report_and_feedback_shapes(tmp_path):
     populate(ws)
     report = workshop.evaluate(ws)
     assert set(report) == V1_REPORT_KEYS and report['version'] == 1
-    assert all(set(c) == V1_CANDIDATE_KEYS for c in report['candidates'])
+    assert all(V1_CANDIDATE_KEYS <= set(c) for c in report['candidates'])
+    # PR 2: the technical report sits next to the v1 one, not inside it.
+    assert all(set(c) - V1_CANDIDATE_KEYS == {'evaluation'} for c in report['candidates'])
     saved = workshop.feedback(ws, {'candidate_id': 'wildcard', 'report': report['report'],
                                    'usefulness': 'use', 'novelty': 'new',
                                    'reason': 'Keeps the pulse'})['feedback']

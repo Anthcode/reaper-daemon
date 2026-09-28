@@ -3,8 +3,6 @@
 The caller composes the DSL. This module never invokes a model, judges musical
 quality, trains on feedback or contacts REAPER. CLI and MCP share this API.
 """
-from collections import Counter
-from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
@@ -13,8 +11,9 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'skills' / 'drum-apparatus'))
-from drumgen import groovekit, smf  # noqa: E402
-from drumgen.goldenrule import enforce, violations  # noqa: E402
+from drumgen import groovekit, smf  # noqa: E402,F401  (smf re-exported)
+from drumgen.evaluate import (evaluate_candidate, family, structure,  # noqa: E402,F401
+                              summary, REPORT_VERSION)
 
 FAMILIES = {'kick', 'snare', 'tom', 'hat', 'ride', 'crash', 'china',
             'splash', 'stack', 'bell', 'choke'}
@@ -52,12 +51,6 @@ def text_value(value, name):
     if not isinstance(value, str) or not value.strip() or len(value) > 4000:
         raise ValueError(f'{name} must be nonempty text, at most 4000 characters')
     return value
-
-
-def family(lane):
-    if lane.endswith('_choke'):
-        return 'choke'
-    return next((f for f in FAMILIES if lane.startswith(f)), lane)
 
 
 def parse(text):
@@ -178,20 +171,6 @@ def prepare(brief, output, base=None):
             'context_isolation': 'Separate files do not sandbox an agent. Supply only its request to each composer.'}
 
 
-def structure(parsed):
-    """Exact score onsets in bar units, independent of kit, velocity and jitter."""
-    events = set()
-    start = 0
-    for section in parsed['sections']:
-        grid = section['grid']
-        for lane in section['lanes']:
-            for step in range(section['bars'] * grid):
-                if lane['cells'][step % len(lane['cells'])] != '.':
-                    events.add((Fraction(start) + Fraction(step, grid), family(lane['lane'])))
-        start += section['bars']
-    return events, start
-
-
 def jaccard(a, b):
     return len(a & b) / len(a | b) if a or b else 0.0
 
@@ -264,56 +243,26 @@ def evaluate(path):
             for key in ('premise', 'development', 'exploration'):
                 text_value(intent.get(key), key)
             parsed = parse(source)
-            events, bars = structure(parsed)
-            brief = manifest['brief']
-            if (parsed['tempo'], parsed['map'], bars) != (brief['tempo'], brief['map'], brief['bars']):
-                raise ValueError('Candidate tempo, map and bars must match the brief')
-            forbidden = {f for _, f in events} & set(brief['exclude_families'])
-            if forbidden:
-                raise ValueError(f'Excluded families present: {sorted(forbidden)}')
-            if not events:
-                raise ValueError('Candidate contains no hits')
             # Keep scores unchanged; render through the existing humanizer.
-            rendered, info = groovekit.build(source, seed=manifest['seed'] + index)
-            end = bars * 4 * info['ppq']
-            rendered = sorted(rendered, key=lambda n: (n['tick'], n['pitch']))
-            for note in rendered:
-                note['tick'] = min(max(0, note['tick']), end - 1)
-                note['dur'] = min(note['dur'], end - note['tick'])
-            # Same-pitch duplicate triggers are invalid. Shorten only overlapping releases.
-            previous = {}
-            for note in rendered:
-                old = previous.get(note['pitch'])
-                if old:
-                    if old['tick'] == note['tick']:
-                        raise ValueError('Duplicate same-pitch trigger after kit mapping')
-                    old['dur'] = min(old['dur'], note['tick'] - old['tick'])
-                previous[note['pitch']] = note
-            rows = [dict(index=i, ppq=n['tick'], pitch=n['pitch']) for i, n in enumerate(rendered)]
-            vel = enforce(rows, {i: n['vel'] for i, n in enumerate(rendered)},
-                          min_gap=1,
-                          bands={pitch: (min(n['vel'] for n in rendered if n['pitch'] == pitch),
-                                         max(n['vel'] for n in rendered if n['pitch'] == pitch))
-                                 for pitch in {n['pitch'] for n in rendered}})
-            if violations(rows, vel):
-                raise ValueError('Cannot enforce dynamics inside rendered velocity bands')
-            for i, note in enumerate(rendered):
-                note['vel'] = vel[i]
-            midi = smf.write_smf(rendered, ppq=info['ppq'], tempo=info['tempo'], end_tick=end)
-            readback = smf.parse_smf(midi)
-            expected = [{'tick': n['tick'], 'pitch': n['pitch'], 'vel': n['vel']} for n in rendered]
-            if readback['notes'] != expected:
-                raise ValueError('MIDI serialization did not preserve the notes')
-            (run / (name + '.mid')).write_bytes(midi)
+            result = evaluate_candidate(source, parsed, manifest['brief'],
+                                        seed=manifest['seed'] + index)
+            findings = result['findings']
+            write_json(run / (name + '.evaluation.json'),
+                       {'version': REPORT_VERSION, 'candidate_id': name,
+                        'findings': findings, 'metrics': result['metrics'],
+                        'summary': summary(findings)})
+            item['evaluation'] = str(run / (name + '.evaluation.json'))
+            item['warnings'].extend(f['message'] for f in findings if f['level'] == 'warning')
+            if not result['valid']:
+                raise ValueError('; '.join(f['message'] for f in findings if f['level'] == 'error'))
+            (run / (name + '.mid')).write_bytes(result['midi'])
             (run / (name + '.dsl')).write_text(source, encoding='utf-8')
+            m = result['metrics']
             item.update(valid=True, dsl_sha256=digest(source), intent=intent,
-                        midi=str(run / (name + '.mid')), notes=len(rendered),
-                        length_seconds=bars * 240 / brief['tempo'],
-                        length_bars=bars, family_hits=dict(Counter(f for _, f in events)))
-            item['warnings'].extend(info['warnings'])
-            hands = Counter(t for t, f in events if f not in {'kick'})
-            if any(n > 2 for n in hands.values()):
-                item['warnings'].append('Review simultaneous hand parts; family counts are only a rough check.')
+                        midi=str(run / (name + '.mid')), notes=m['notes'],
+                        length_seconds=m['length_seconds'], length_bars=m['length_bars'],
+                        family_hits=m['family_hits'])
+            item['warnings'][:0] = groovekit.exposed_focal_hits(parsed)
             parsed_candidates[name] = parsed
         except (ValueError, OSError, KeyError, TypeError, IndexError, ZeroDivisionError) as exc:
             item.update(valid=False, error=str(exc))
