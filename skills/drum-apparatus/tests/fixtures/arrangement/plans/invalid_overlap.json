@@ -1,0 +1,70 @@
+{
+  "schema_version": 1,
+  "tempo": 182,
+  "meter": "4/4",
+  "kit_map": "RS Monarch",
+  "seed": 42,
+  "exclude_families": [
+    "choke"
+  ],
+  "sections": [
+    {
+      "id": "intro",
+      "bars": 4,
+      "role": "intro",
+      "energy": 0.4,
+      "cymbal_strategy": "crash_accents",
+      "transition_out": "pickup",
+      "evidence": {
+        "section_boundary": "user_explicit"
+      }
+    },
+    {
+      "id": "verse_1",
+      "bars": 8,
+      "role": "verse",
+      "energy": 0.55,
+      "kick_strategy": "riff_selective",
+      "snare_strategy": "backbeat",
+      "cymbal_strategy": "closed_hat",
+      "exclude_families": [
+        "ride"
+      ],
+      "transition_out": "short_pickup",
+      "evidence": {
+        "section_boundary": "user_explicit",
+        "kick_grid": "audio_inferred"
+      },
+      "start_bar": 3
+    },
+    {
+      "id": "chorus_1",
+      "bars": 8,
+      "role": "chorus",
+      "energy": 0.85,
+      "kick_strategy": "double_bass",
+      "snare_strategy": "backbeat",
+      "cymbal_strategy": "ride",
+      "require_families": [
+        "ride"
+      ],
+      "transition_out": "stop",
+      "evidence": {
+        "section_boundary": "audio_inferred"
+      }
+    },
+    {
+      "id": "breakdown",
+      "bars": 4,
+      "role": "breakdown",
+      "energy": 0.7,
+      "kick_strategy": "riff_locked",
+      "snare_strategy": "half_time",
+      "cymbal_strategy": "china",
+      "transition_out": "silence_entry",
+      "evidence": {
+        "section_boundary": "default"
+      }
+    }
+  ]
+}

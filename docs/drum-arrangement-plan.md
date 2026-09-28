@@ -14,7 +14,8 @@ Stan zweryfikowany w kodzie (baseline):
 
 | Fakt | Miejsce | Skutek dla planu |
 |---|---|---|
-| 145 testów `skills/drum-apparatus/tests` + `tests/test_drum_workshop.py` przechodzi | — | Baseline Etapu 0 |
+| 145 testów `skills/drum-apparatus/tests` + `tests/test_drum_workshop.py` przechodzi (cały zestaw: 612 + 1 pominięty) | — | Baseline Etapu 0 |
+| `render()` zerował pamięć velocity na granicy sekcji, więc Golden Rule mogła paść między sekcjami | `groovekit.render` | Naprawione w PR 1 |
 | Metrum 4/4 zaszyte w rendererze i warsztacie | `groovekit.py` (`step_qn = 4.0 / grid`, `bars * 4.0`), `drum_workshop.evaluate` (`bars*4*ppq`, `bars*240/tempo`) | MVP obsługuje tylko 4/4 |
 | Warsztat przyjmuje 1–64 takty | `drum_workshop.parse` | Dłuższy utwór wymaga decyzji (§3.1) |
 | Manifest akceptuje tylko `fresh/contrast/wildcard` lub `fresh/reference/wildcard` i `version == 1` | `drum_workshop.load_workspace` | Nowe role wymagają manifestu v2 |
@@ -156,8 +157,8 @@ Zachować obecny format (`usefulness`: `use`/`revise`/`reject`, `novelty`, `reas
 
 1. Zapisać baseline: 145 testów drum-apparatus i warsztatu.
 2. Fixtures: prosty riff 4/4, blast beat, breakdown z pauzą, dwa zbliżone verse’y, utwór bez riffu, niepełna mapa MIDI (rola bez fallbacku), zakaz rodziny globalny i per sekcja, plan > 64 takty, `meter: "7/8"`.
-3. Schematy planu, raportu i manifestu v2; test, że manifest v1 i obecne `groove`, `humanize`, `drum-workshop evaluate` działają bez zmian.
-4. Utworzyć `HANDOFF.md` (wymagany przez `AGENTS.md`, obecnie go brak) z bieżącym stanem prac.
+3. Schemat planu (`drumgen/arrangement_schema.py`); test kontraktu v1 manifestu, raportu i feedbacku (`tests/test_drum_workshop_compat.py`). Kształt raportu v2 i manifestu v2 powstaje w PR 2 i PR 4, razem z kodem, który ich używa.
+4. Stan prac zapisywać w lokalnym `HANDOFF.md`. Plik jest celowo w `.gitignore` (notatki wewnętrzne), więc nie trafia do repozytorium.
 
 **Odbiór:** testy regresyjne przechodzą; żadne istniejące polecenie nie wymaga nowych pól.
 
@@ -241,7 +242,7 @@ Zadania:
 
 | PR | Zakres | Zależność | Kryterium ukończenia |
 |---|---|---|---|
-| 1 | Baseline, schematy, fixtures, `HANDOFF.md` | Brak | 145+ testów przechodzi, manifest v1 bez zmian |
+| 1 | Baseline, schemat planu, fixtures | Brak | Zrobione: 657 testów przechodzi, manifest v1 bez zmian; poprawka Golden Rule między sekcjami |
 | 2 | `evaluate.py` + kontrola mapowania | PR 1 | Wykrywa naruszenia z fixtures, nie blokuje poprawnych |
 | 3 | `arrangement.py` (plan offline) | PR 1 | Plan deterministyczny, walidacja 4/4 i ≤ 64 taktów |
 | 4 | Manifest v2 + żądania z planem + granice sekcji | PR 2, PR 3 | 3 kandydatury z wildcardem zgodne z planem |
