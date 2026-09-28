@@ -1,8 +1,8 @@
 """Baseline behavior of the shared fixtures before the arrangement work.
 
-These tests record what the engine does today, so later PRs change it
-deliberately. The unmapped-role test documents a known gap: PR 2 turns the
-silent drop into an evaluation error and must update that test.
+These tests record what the engine does, so later PRs change it deliberately.
+An unmapped role still renders nothing, but since PR 2 the build reports it and
+drumgen.evaluate turns it into an error.
 """
 import json
 import os
@@ -50,13 +50,13 @@ def test_similar_verses_share_the_backbone():
     assert "hat_c" in lanes[0] and "ride" in lanes[1]
 
 
-def test_unmapped_role_is_dropped_silently_today(monkeypatch):
+def test_unmapped_role_is_dropped_but_reported(monkeypatch):
     sparse = json.loads((FIXTURES / "maps" / "sparse_kit.json").read_text())
     real = groovekit.load_maps
     monkeypatch.setattr(groovekit, "load_maps", lambda: {**real(), **sparse})
     events, info = groovekit.build(source("unmapped_china"), seed=7)
-    pitches = {e["pitch"] for e in events}
-    assert pitches == {36, 38}  # the china hit is gone, and nothing says so
+    assert {e["pitch"] for e in events} == {36, 38}  # the china hit is gone...
+    assert info["unmapped_roles"] == ["CHINA_R"]     # ...and the build says so
 
 
 def _click_wav(path, sr, times, seconds):

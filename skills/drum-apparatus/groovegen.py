@@ -56,6 +56,9 @@ def main(argv=None):
           f"-> {out}")
     for w in info.get("warnings", []):
         print(f"  warn: {w}")
+    for role in info.get("unmapped_roles", []):
+        print(f"  warn: map {info['map']!r} has no pitch or fallback for {role}; "
+              f"those hits were dropped")
     return 0
 
 

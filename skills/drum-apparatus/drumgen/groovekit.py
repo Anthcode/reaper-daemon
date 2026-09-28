@@ -366,11 +366,14 @@ def _fatigue_factor(pos, run_len):
     return 0.20 * frac  # fraction of (base-1) to subtract
 
 
-def render(sections, params, rng):
+def render(sections, params, rng, resolution=None):
     """Render parsed sections into MIDI events with full humanization.
 
     params keys: tempo, ppq, map (name), humanize (0..100 amount).
     Returns a list of {tick, pitch, vel, dur} suitable for write_smf.
+    resolution: optional dict, filled with {role played: role that sounded,
+    or None when the map has neither the role nor a fallback}. Only roles
+    that actually fire are recorded, so callers can report dropped hits.
     """
     ppq = params["ppq"]
     humanize = params.get("humanize", 20)
@@ -380,16 +383,20 @@ def render(sections, params, rng):
     kick_min = params.get("kick_vel_min", KICK_VEL_MIN)
     run_lo, run_hi = params.get("kick_run_band", KICK_RUN_BAND)
 
-    def pitch_for(role):
+    def resolve_role(role):
         r = role
         seen = set()
         while r not in drum_map and r in ROLE_FALLBACKS and r not in seen:
             seen.add(r)
             r = ROLE_FALLBACKS[r]
-        if r not in drum_map:
+        return r if r in drum_map else None
+
+    def pitch_for(role):
+        r = resolve_role(role)
+        if r is None:
             # Truly unmapped (no fallback chain reaches a real pitch). Drop
             # the note rather than crash — render() is best-effort on a
-            # partial map and the caller's report flags what's missing.
+            # partial map; `resolution` tells the caller what was dropped.
             return None
         return drum_map[r]
 
@@ -661,6 +668,8 @@ def render(sections, params, rng):
         # neighbors could land at machine-gun gap 1.
         for it in section_intents:
             it["_pitch"] = pitch_for(it["role"])
+            if resolution is not None and it["role"] not in resolution:
+                resolution[it["role"]] = resolve_role(it["role"])
         section_intents.sort(key=lambda it: it["gstep"])  # stable: lane order kept on ties
         for it in section_intents:
             pitch = it["_pitch"]
@@ -768,7 +777,8 @@ def build(text, seed=None, default_map="GM Standard"):
         "map": parsed["map"],
         "humanize": 20,
     }
-    events = render(parsed["sections"], params, rng)
+    resolution = {}
+    events = render(parsed["sections"], params, rng, resolution)
     total_bars = sum(s["bars"] for s in parsed["sections"])
     info = {
         "tempo": parsed["tempo"],
@@ -779,6 +789,11 @@ def build(text, seed=None, default_map="GM Standard"):
         "notes": len(events),
         "sections": [s["name"] for s in parsed["sections"]],
         "warnings": exposed_focal_hits(parsed),
+        # Roles the map could not play at all (their hits are not in `events`)
+        # and roles that sounded through a fallback, e.g. SNARE_RIM -> SNARE.
+        "unmapped_roles": sorted(r for r, got in resolution.items() if got is None),
+        "fallback_roles": {r: got for r, got in sorted(resolution.items())
+                           if got is not None and got != r},
     }
     return events, info
 
