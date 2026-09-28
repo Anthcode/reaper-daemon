@@ -758,27 +758,38 @@ def exposed_focal_hits(parsed, limit=8):
     return warnings
 
 
-def build(text, seed=None, default_map="GM Standard"):
+# Render parameters a caller may override (drumgen.performer profiles do).
+PARAM_KEYS = {"humanize", "kick_vel_min", "kick_vel_max", "kick_run_band"}
+
+
+def build(text, seed=None, default_map="GM Standard", params=None):
     """Parse DSL text and render events. Returns (events, info_dict).
 
     Seed precedence: explicit `seed` arg > @seed in DSL > random.
     default_map is the kit used when the DSL omits `@map` (an explicit `@map`
     in the DSL always wins).
+    params: optional overrides from PARAM_KEYS; None renders exactly as
+    before (humanize 20 and the module's kick defaults).
     """
+    params = dict(params or {})
+    unknown = set(params) - PARAM_KEYS
+    if unknown:
+        raise ValueError(f"unknown render params: {sorted(unknown)}")
     parsed = parse_dsl(text, default_map=default_map or "GM Standard")
     if seed is None:
         seed = parsed["seed"]
     if seed is None:
         seed = random.randrange(1, 2**31 - 1)
     rng = random.Random(seed)
-    params = {
+    render_params = {
         "tempo": parsed["tempo"],
         "ppq": parsed["ppq"],
         "map": parsed["map"],
         "humanize": 20,
+        **params,
     }
     resolution = {}
-    events = render(parsed["sections"], params, rng, resolution)
+    events = render(parsed["sections"], render_params, rng, resolution)
     total_bars = sum(s["bars"] for s in parsed["sections"])
     info = {
         "tempo": parsed["tempo"],
@@ -798,8 +809,8 @@ def build(text, seed=None, default_map="GM Standard"):
     return events, info
 
 
-def build_midi(text, seed=None, default_map="GM Standard"):
+def build_midi(text, seed=None, default_map="GM Standard", params=None):
     """Parse + render + serialize to MIDI bytes. Returns (bytes, info)."""
-    events, info = build(text, seed=seed, default_map=default_map)
+    events, info = build(text, seed=seed, default_map=default_map, params=params)
     data = write_smf(events, ppq=info["ppq"], tempo=info["tempo"])
     return data, info
