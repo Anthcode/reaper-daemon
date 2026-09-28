@@ -3,6 +3,7 @@
 The caller composes the DSL. This module never invokes a model, judges musical
 quality, trains on feedback or contacts REAPER. CLI and MCP share this API.
 """
+from fractions import Fraction
 import hashlib
 import json
 from pathlib import Path
@@ -13,7 +14,8 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'skills' / 'drum-apparatus'))
 from drumgen import arrangement, groovekit, smf  # noqa: E402,F401  (smf re-exported)
 from drumgen.arrangement_schema import validate_plan  # noqa: E402
-from drumgen import candidates  # noqa: E402
+from drumgen import candidates, performer as performers  # noqa: E402
+from drumgen.evaluate import section_scores  # noqa: E402
 from drumgen.evaluate import (evaluate_candidate, family, structure,  # noqa: E402,F401
                               summary, REPORT_VERSION)
 
@@ -103,7 +105,7 @@ def validate_brief(brief):
     if not isinstance(brief, dict):
         raise ValueError('brief must be an object')
     allowed = {'request_id', 'project_id', 'description', 'tempo', 'bars', 'map',
-               'seed', 'exclude_families', 'preferences', 'references', 'plan'}
+               'seed', 'exclude_families', 'preferences', 'references', 'plan', 'performer'}
     if set(brief) - allowed:
         raise ValueError(f'Unknown brief fields: {sorted(set(brief) - allowed)}')
     for key in ('request_id', 'project_id', 'description', 'map'):
@@ -122,6 +124,7 @@ def validate_brief(brief):
         raise ValueError('references must be a list of at most 8 approved DSL files')
     if 'plan' in brief:
         text_value(brief['plan'], 'plan')
+    performers.get(brief.get('performer'))
     return brief
 
 
@@ -196,6 +199,9 @@ def prepare(brief, output, base=None):
     manifest = {'version': 1, 'context': context, 'brief': public,
                 'seed': brief.get('seed', 1), 'candidates': roles, 'references': references,
                 'preferences': active_preferences(brief.get('preferences', []), context)}
+    if brief.get('performer'):
+        # How the renderer plays the parts; composers never see it.
+        manifest['performer'] = performers.get(brief['performer'])
     if plan:
         raw = json.loads(plan_source)
         manifest.update(version=2, plan=raw, plan_sha256=digest(canonical(raw)),
@@ -277,8 +283,42 @@ def load_workspace(path):
     return workspace, manifest
 
 
-def evaluate(path):
+def _frozen_parse(candidate):
+    return parse(Path(candidate['midi']).with_suffix('.dsl').read_text(encoding='utf-8'))
+
+
+def revision(workspace, parent_path, parent, name, parsed):
+    """How a candidate changed against the same candidate in a parent report."""
+    before = next((c for c in parent['candidates'] if c['candidate_id'] == name and c['valid']), None)
+    if before is None:
+        return None
+    old, new = section_scores(_frozen_parse(before)), section_scores(parsed)
+    changed = sorted(n for n in set(old) | set(new) if old.get(n) != new.get(n))
+    requested = set()
+    for path in sorted(workspace.glob('feedback-*.json')):
+        record = read_json(path)
+        if (record.get('candidate_id'), record.get('usefulness'), record.get('report')) == \
+                (name, 'revise', str(parent_path)) and record.get('section_id'):
+            requested.add(record['section_id'])
+    result = {'parent_report': str(parent_path), 'changed_sections': changed,
+              'unchanged_sections': sorted(n for n in new if n not in changed),
+              'requested_sections': sorted(requested),
+              'meaning': ('Score onsets per section; velocities and timing are re-humanized '
+                          'on every render, so they are not compared.')}
+    outside = sorted(set(changed) - requested) if requested else []
+    if outside:
+        result['outside_request'] = outside
+    return result
+
+
+def evaluate(path, parent=None):
     workspace, manifest = load_workspace(path)
+    parent_path = parent_report = None
+    if parent:
+        parent_path = local_file(workspace, parent)
+        parent_report = read_json(parent_path)
+        if not isinstance(parent_report, dict) or not isinstance(parent_report.get('candidates'), list):
+            raise ValueError('Invalid parent report')
     run = workspace / ('evaluation-' + uuid.uuid4().hex)
     run.mkdir()
     results, parsed_candidates = [], {}
@@ -298,7 +338,8 @@ def evaluate(path):
             plan = manifest.get('normalized_plan')
             result = evaluate_candidate(source, parsed, manifest['brief'],
                                         seed=manifest['seed'] + index, plan=plan,
-                                        riff_kick=candidates.kick_targets(plan) if plan else None)
+                                        riff_kick=candidates.kick_targets(plan) if plan else None,
+                                        performer=manifest.get('performer'))
             findings = result['findings']
             write_json(run / (name + '.evaluation.json'),
                        {'version': REPORT_VERSION, 'candidate_id': name,
@@ -313,9 +354,17 @@ def evaluate(path):
             m = result['metrics']
             item.update(valid=True, dsl_sha256=digest(source), intent=intent,
                         midi=str(run / (name + '.mid')), notes=m['notes'],
+                        midi_sha256=hashlib.sha256(result['midi']).hexdigest(),
                         length_seconds=m['length_seconds'], length_bars=m['length_bars'],
                         family_hits=m['family_hits'])
             item['warnings'][:0] = groovekit.exposed_focal_hits(parsed)
+            if parent_report is not None:
+                change = revision(workspace, parent_path, parent_report, name, parsed)
+                if change:
+                    item['revision'] = change
+                    if change.get('outside_request'):
+                        item['warnings'].append('Revision changed sections the feedback did not ask for: '
+                                                + ', '.join(change['outside_request']))
             parsed_candidates[name] = parsed
         except (ValueError, OSError, KeyError, TypeError, IndexError, ZeroDivisionError) as exc:
             item.update(valid=False, error=str(exc))
@@ -339,6 +388,8 @@ def evaluate(path):
               'policy': 'Keep every valid candidate, including the wildcard. Similarity is advisory; no automatic winner.',
               'quality': 'unassessed; requires listening through the destination kit',
               'report': str(run / 'report.json')}
+    if parent_path is not None:
+        report['parent_report'] = str(parent_path)
     write_json(run / 'report.json', report)
     return report
 
@@ -368,7 +419,15 @@ def feedback(path, record):
         raise ValueError('Feedback scope must be request, project or global')
     if scope == 'global' and record.get('confirmed') is not True:
         raise ValueError('Global feedback requires explicit confirmed: true')
+    section = record.get('section_id')
+    if section is not None:
+        # A section-scoped note: which part of the auditioned candidate it is about.
+        names = [s['name'] for s in _frozen_parse(candidate)['sections']]
+        if section not in names:
+            raise ValueError(f'section_id must name a section of the candidate: {names}')
     saved = {k: record[k] for k in ('candidate_id', 'usefulness', 'novelty', 'reason')}
+    if section is not None:
+        saved['section_id'] = section
     saved.update(scope=scope, context=manifest['context'], dsl_sha256=candidate['dsl_sha256'],
                  report=str(report_path), source='user_feedback',
                  preference_promotion='none; observations do not automatically become rules')
@@ -377,6 +436,78 @@ def feedback(path, record):
     output = workspace / ('feedback-' + uuid.uuid4().hex + '.json')
     write_json(output, saved)
     return {'ok': True, 'path': str(output), 'feedback': saved}
+
+
+def _chosen(workspace, record):
+    """The evaluated candidate a record names, with its report path."""
+    if not isinstance(record, dict):
+        raise ValueError('record must be an object with candidate_id and report')
+    report_path = local_file(workspace, text_value(record.get('report'), 'report'))
+    report = read_json(report_path)
+    name = record.get('candidate_id')
+    candidate = next((c for c in report.get('candidates', [])
+                      if c.get('candidate_id') == name and c.get('valid')), None)
+    if candidate is None:
+        raise ValueError('pick needs a valid candidate from an evaluation report')
+    midi = local_file(workspace, Path(candidate['midi']).relative_to(workspace))
+    if hashlib.sha256(midi.read_bytes()).hexdigest() != candidate.get('midi_sha256'):
+        raise ValueError('The evaluated MIDI changed since the audition; evaluate again')
+    return report_path, candidate, midi
+
+
+def pick(path, record):
+    """Check a choice and return the insert_midi_file payload for the frozen MIDI.
+
+    Never contacts REAPER. The choice must follow `use` feedback on the same
+    evaluation, so nothing reaches the project before an audition decision.
+    """
+    workspace, manifest = load_workspace(path)
+    report_path, candidate, midi = _chosen(workspace, record)
+    decided = [read_json(p) for p in sorted(workspace.glob('feedback-*.json'))]
+    if not any((d.get('candidate_id'), d.get('usefulness'), d.get('report'), d.get('dsl_sha256'))
+               == (candidate['candidate_id'], 'use', str(report_path), candidate['dsl_sha256'])
+               for d in decided):
+        raise ValueError("Record 'use' feedback for this candidate and report before picking it")
+    notes = smf.parse_smf(midi.read_bytes())
+    return {'ok': True, 'candidate_id': candidate['candidate_id'], 'report': str(report_path),
+            'midi_sha256': candidate['midi_sha256'], 'expected_notes': len(notes['notes']),
+            'insert_midi_file': {'midi_path': str(midi),
+                                 'length': {'type': 'bars', 'bars': manifest['brief']['bars']},
+                                 'loop': False, 'replace_existing_in_range': False},
+            'next': ('Check the bridge, resolve the track by GUID or verified name, and use '
+                     'dry_run when unsure. Call insert_midi_file with this payload plus the '
+                     'track and position, read the take with get_midi_notes, then run verify.'),
+            'keep_file': ('REAPER may import MIDI by reference; keep this workspace while the '
+                          'item uses the file.')}
+
+
+def verify(path, record):
+    """Compare notes read back from REAPER with the frozen MIDI that was picked."""
+    workspace, _ = load_workspace(path)
+    _, candidate, midi = _chosen(workspace, record)
+    readback = record.get('readback')
+    if isinstance(readback, str):
+        readback = read_json(local_file(workspace, readback) if not Path(readback).is_absolute()
+                             else Path(readback))
+    if isinstance(readback, dict) and isinstance(readback.get('data'), dict):
+        readback = readback['data']  # a raw bridge reply
+    if not isinstance(readback, dict) or not isinstance(readback.get('notes'), list):
+        raise ValueError('readback must be get_midi_notes output with notes and ppq_per_quarter')
+    if readback.get('truncated'):
+        raise ValueError('The readback was truncated; read again with a larger max_notes')
+    frozen = smf.parse_smf(midi.read_bytes())
+    scale = Fraction(readback.get('ppq_per_quarter', frozen['ppq']), frozen['ppq'])
+    want = sorted((Fraction(n['tick']) * scale, n['pitch'], n['vel']) for n in frozen['notes'])
+    got = sorted((Fraction(n['ppq']), n['pitch'], n['velocity'])
+                 for n in readback['notes'] if not n.get('muted'))
+    missing = [w for w in want if w not in got]
+    extra = [g for g in got if g not in want]
+    same = not missing and not extra
+    return {'ok': same, 'candidate_id': candidate['candidate_id'], 'expected': len(want),
+            'read': len(got), 'missing': len(missing), 'unexpected': len(extra),
+            'verdict': ('Inserted notes match the auditioned MIDI.' if same else
+                        'Inserted notes differ from the auditioned MIDI. One REAPER undo '
+                        'reverts the insert.')}
 
 
 def plan(path, output):
@@ -414,7 +545,7 @@ def check_plan(path):
             'caveats': normalized['caveats']}
 
 
-def run(action, path, output=None, record=None):
+def run(action, path, output=None, record=None, parent=None):
     if action == 'plan':
         if not output:
             raise ValueError('plan requires output')
@@ -426,7 +557,11 @@ def run(action, path, output=None, record=None):
             raise ValueError('prepare requires output')
         return prepare(read_json(path), output, Path(path).resolve().parent)
     if action == 'evaluate':
-        return evaluate(path)
+        return evaluate(path, parent)
+    if action == 'pick':
+        return pick(path, record)
+    if action == 'verify':
+        return verify(path, record)
     if action == 'feedback':
         return feedback(path, record)
     raise ValueError('Unknown workshop action')
@@ -435,7 +570,7 @@ def run(action, path, output=None, record=None):
 def cli(args):
     try:
         result = run(args.action, args.path, args.output,
-                     read_json(args.feedback) if args.feedback else None)
+                     read_json(args.feedback) if args.feedback else None, args.parent)
         print(json.dumps(result, indent=2))
         return 0 if result['ok'] else 1
     except (ValueError, OSError, TypeError, KeyError) as exc:
@@ -446,9 +581,12 @@ def cli(args):
 def add_parser(sub):
     parser = sub.add_parser('drum-workshop', help='Prepare and compare drum ideas without changing REAPER')
     parser.add_argument('action', choices=['prepare', 'evaluate', 'feedback',
-                                           'plan', 'check-plan'])
+                                           'plan', 'check-plan', 'pick', 'verify'])
     parser.add_argument('path', help='Brief JSON for prepare or plan; plan JSON for '
                                      'check-plan; workshop folder otherwise')
     parser.add_argument('--output', help='New workshop folder for prepare; new plan file for plan')
-    parser.add_argument('--feedback', help='User feedback JSON for feedback')
+    parser.add_argument('--feedback', help='User feedback JSON for feedback; the choice '
+                                           '(candidate_id, report, and readback for verify) '
+                                           'for pick and verify')
+    parser.add_argument('--parent', help='Earlier report.json to compare a revision against')
     parser.set_defaults(func=cli)

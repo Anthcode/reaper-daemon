@@ -2090,7 +2090,7 @@ def tool_drum_workshop(args):
     from drum_workshop import run
     try:
         result = run(args.get("action"), args.get("path"),
-                     args.get("output"), args.get("feedback"))
+                     args.get("output"), args.get("feedback"), args.get("parent"))
         return _text(json.dumps(result), is_error=not result["ok"])
     except (ValueError, OSError, TypeError, KeyError) as exc:
         return _text(json.dumps({"ok": False, "error": str(exc)}), is_error=True)
@@ -2098,12 +2098,13 @@ def tool_drum_workshop(args):
 
 TOOLS.append({
     "name": "drum_workshop",
-    "description": "Plan drum sections from a brief (plan, check-plan), prepare separate composition requests, compare authored drum DSL candidates, export MIDI, or record explicit user audition feedback. Local files only; never changes REAPER. A plan reads audio only from a saved project named in the brief and marks it audio_inferred; the user's sections always win. A prepare brief may name a plan; each request then gets its part of the plan, and an audio kick sketch reaches only the reference request. Fresh and wildcard requests omit reference patterns. The calling agent writes candidate.dsl and intent.json before evaluate. Comparisons measure structural similarity, not musical quality. No model is invoked and no winner is selected.",
+    "description": "Plan drum sections from a brief (plan, check-plan), prepare separate composition requests, compare authored drum DSL candidates, export MIDI, or record explicit user audition feedback. Local files only; never changes REAPER. A plan reads audio only from a saved project named in the brief and marks it audio_inferred; the user's sections always win. A prepare brief may name a plan and a performer profile; each request then gets its part of the plan, and an audio kick sketch reaches only the reference request. evaluate with parent compares a revision section by section. pick returns the insert_midi_file payload for the auditioned MIDI after 'use' feedback; verify compares a get_midi_notes readback with it. Fresh and wildcard requests omit reference patterns. The calling agent writes candidate.dsl and intent.json before evaluate. Comparisons measure structural similarity, not musical quality. No model is invoked and no winner is selected.",
     "inputSchema": _schema({
-        "action": {"type": "string", "enum": ["prepare", "evaluate", "feedback", "plan", "check-plan"]},
+        "action": {"type": "string", "enum": ["prepare", "evaluate", "feedback", "plan", "check-plan", "pick", "verify"]},
         "path": {"type": "string", "description": "Brief JSON for prepare or plan; plan JSON for check-plan; workshop folder otherwise"},
         "output": {"type": "string", "description": "New workshop folder for prepare; new plan file for plan"},
-        "feedback": {"type": "object", "description": "Explicit user feedback: candidate_id, report, usefulness, novelty, reason, optional scope and confirmed"},
+        "feedback": {"type": "object", "description": "feedback: explicit user feedback (candidate_id, report, usefulness, novelty, reason, optional section_id, scope and confirmed). pick: {candidate_id, report}. verify: {candidate_id, report, readback} with readback the get_midi_notes result or a path to it"},
+        "parent": {"type": "string", "description": "evaluate: an earlier report.json in the workshop to compare a revision against"},
     }, ["action", "path"]),
     "handler": tool_drum_workshop,
 })

@@ -15,7 +15,7 @@ calibrates them. A sparse groove is not a defect: note count is a metric only.
 from collections import Counter
 from fractions import Fraction
 
-from . import groovekit, smf
+from . import fills, groovekit, performer as performers, smf
 from .arrangement_schema import FAMILIES
 from .goldenrule import enforce, violations
 
@@ -57,6 +57,15 @@ def structure(parsed):
     return events, start
 
 
+def section_scores(parsed):
+    """{section name: (bars, onsets relative to the section start)} for revisions."""
+    events, _ = structure(parsed)
+    out = {}
+    for name, start, end in _section_ranges(parsed):
+        out[name] = (end - start, frozenset((t - start, f) for t, f in events if start <= t < end))
+    return out
+
+
 def finding(level, check, message, **data):
     assert level in LEVELS
     item = {"level": level, "check": check, "message": message}
@@ -80,8 +89,11 @@ def _section_ranges(parsed):
     return ranges
 
 
-def check_score(parsed, brief, plan=None):
-    """Checks that need only the parsed score. Returns (findings, events, bars)."""
+def check_score(parsed, brief, plan=None, performer=None):
+    """Checks that need only the parsed score. Returns (findings, events, bars).
+
+    performer: a profile from drumgen.performer.get(), or None.
+    """
     findings = []
     events, bars = structure(parsed)
     got = (parsed["tempo"], parsed["map"], bars)
@@ -101,6 +113,18 @@ def check_score(parsed, brief, plan=None):
         findings.extend(_check_plan(parsed, events, plan))
     findings.extend(_check_limbs(parsed))
     findings.extend(_check_repetition(events, bars))
+    planned = {s["id"]: s["transition_out"] for s in plan["sections"]
+               if s.get("transition_out")} if plan else None
+    findings.extend(fills.check(events, _section_ranges(parsed), planned))
+    rate = performers.fastest_kick_rate(events, parsed["tempo"])
+    findings.append(finding("info", "kick_rate", f"Fastest kick pair: {rate} strokes per second",
+                            strokes_per_second=rate))
+    limit = (performer or {}).get("limits", {}).get("max_kick_strokes_per_second")
+    if limit and rate > limit:
+        findings.append(finding("warning", "kick_rate",
+                                f"Kicks reach {rate} strokes per second; profile "
+                                f"{performer['name']} is set to {limit}",
+                                strokes_per_second=rate, limit=limit))
     return findings, events, bars
 
 
@@ -169,14 +193,14 @@ def _check_repetition(events, bars):
     return findings
 
 
-def render_checked(source, bars, seed):
+def render_checked(source, bars, seed, params=None):
     """Render through the shared humanizer and prove the MIDI.
 
     Returns (findings, rendered notes, midi bytes or None, build info). Any
     error finding means the MIDI is not safe to export.
     """
     findings = []
-    rendered, info = groovekit.build(source, seed=seed)
+    rendered, info = groovekit.build(source, seed=seed, params=params)
     if info["unmapped_roles"]:
         findings.append(finding("error", "kit_mapping",
                                 f"Map {info['map']!r} cannot play {info['unmapped_roles']} "
@@ -262,7 +286,7 @@ def metrics(events, bars, tempo, notes):
             "hits_per_bar": {f: round(n / bars, 3) for f, n in sorted(hits.items())} if bars else {}}
 
 
-def evaluate_candidate(source, parsed, brief, seed, plan=None, riff_kick=None):
+def evaluate_candidate(source, parsed, brief, seed, plan=None, riff_kick=None, performer=None):
     """Run every check on one parsed candidate.
 
     brief: {tempo, map, bars, exclude_families}. plan: a normalized plan from
@@ -271,10 +295,11 @@ def evaluate_candidate(source, parsed, brief, seed, plan=None, riff_kick=None):
     {section, start_bar (0-based), grid, source} for section grids.
     Returns {valid, findings, metrics, midi, rendered}.
     """
-    findings, events, bars = check_score(parsed, brief, plan)
+    findings, events, bars = check_score(parsed, brief, plan, performer)
     midi, rendered = None, []
     if not any(f["level"] == "error" for f in findings):
-        more, rendered, midi, info = render_checked(source, bars, seed)
+        more, rendered, midi, info = render_checked(
+            source, bars, seed, performer["params"] if performer else None)
         findings.extend(more)
         if midi is None and not any(f["level"] == "error" for f in findings):
             findings.append(finding("error", "empty", "Nothing rendered to MIDI"))
@@ -286,8 +311,9 @@ def evaluate_candidate(source, parsed, brief, seed, plan=None, riff_kick=None):
                                       section=target.get("section"),
                                       source=target.get("source", "audio_inferred")))
     valid = midi is not None and not any(f["level"] == "error" for f in findings)
-    return {"valid": valid, "findings": findings,
-            "metrics": metrics(events, bars, brief["tempo"], len(rendered)),
+    measured = metrics(events, bars, brief["tempo"], len(rendered))
+    measured["performer"] = performer["name"] if performer else None
+    return {"valid": valid, "findings": findings, "metrics": measured,
             "midi": midi if valid else None, "rendered": rendered}
 
 

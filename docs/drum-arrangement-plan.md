@@ -240,6 +240,8 @@ Zadania:
 
 **Odbiór:** odrzucenie nie zmienia projektu; zapis tylko po wyborze; wstawione nuty są identyczne z odsłuchanym plikiem.
 
+Stan po PR 5: warsztat nie łączy się z REAPER-em. `pick` wymaga feedbacku `use` i niezmienionego pliku MIDI, a zwraca payload dla istniejącego `insert_midi_file`. `verify` porównuje odczyt `get_midi_notes` z tym plikiem. Punkt 7 (pomiary audio po renderze) nie wszedł do PR 5. Kontrole filli są wyłącznie ostrzeżeniami: fill przechodzący przez kreskę taktową do nowej sekcji to częsty zabieg muzyczny, więc nie blokuje kandydatury.
+
 ## 6. PR-y i zależności
 
 | PR | Zakres | Zależność | Kryterium ukończenia |
@@ -248,7 +250,7 @@ Zadania:
 | 2 | `evaluate.py` + kontrola mapowania | PR 1 | Zrobione: MIDI z warsztatu identyczne bajt po bajcie jak przed wydzieleniem; nowe bramki: mapowanie, sekcje planu, zakazy per sekcja, kończyny, powtarzalność, kick–riff |
 | 3 | `arrangement.py` (plan offline) | PR 1 | Zrobione: `drum-workshop plan` / `check-plan` (CLI i MCP), plan edytowalny, priorytet użytkownika nad audio, pole `kick_grid` |
 | 4 | Manifest v2 + żądania z planem + granice sekcji | PR 2, PR 3 | Zrobione: `drumgen/candidates.py`, manifest v2 ze snapshotem planu, szkic z audio tylko w `reference`, ewaluacja sekcji, zakazów per sekcja i kick–riff |
-| 5 | Fille, `build(params=...)`, profile, rewizje, zapis `.mid` | PR 4 | Zapisane nuty = odsłuchany plik; brak profilu = dotychczasowe MIDI |
+| 5 | Fille, `build(params=...)`, profile, rewizje, zapis `.mid` | PR 4 | Zrobione offline: brak profilu = identyczne MIDI; `pick` zwraca payload `insert_midi_file` dla odsłuchanego pliku, `verify` porównuje odczyt z REAPER-a. **Czeka na ręczny test w REAPER-ze.** |
 
 PR 2 i PR 3 mogą iść równolegle.
 

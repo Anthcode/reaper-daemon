@@ -12,7 +12,9 @@ decides which parts of a plan go into which request:
     goes only to the `reference` request, never to fresh or the wildcard.
 """
 
-GENERATOR_VERSION = 1
+from . import fills
+
+GENERATOR_VERSION = 2
 
 HARD_FIELDS = ("id", "start_bar", "bars", "role", "effective_exclusions", "require_families")
 TREATMENT_FIELDS = ("energy", "kick_strategy", "snare_strategy", "cymbal_strategy",
@@ -37,10 +39,14 @@ def has_sketch(plan):
 def request_plan(plan, role):
     """The part of a normalized plan a request with this role may see."""
     sections = []
-    for section in plan["sections"]:
+    following = plan["sections"][1:] + [None]
+    for section, after in zip(plan["sections"], following):
         view = {k: section[k] for k in HARD_FIELDS}
         if role != "wildcard":
             view.update({k: section[k] for k in TREATMENT_FIELDS if k in section})
+            transition = fills.hint(section, after)
+            if transition:
+                view["transition_hint"] = transition
         grid = section.get("kick_grid")
         source = section["evidence"].get("kick_grid")
         if grid and source == "user_explicit":

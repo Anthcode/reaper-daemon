@@ -38,8 +38,9 @@ def test_v1_report_and_feedback_shapes(tmp_path):
     report = workshop.evaluate(ws)
     assert set(report) == V1_REPORT_KEYS and report['version'] == 1
     assert all(V1_CANDIDATE_KEYS <= set(c) for c in report['candidates'])
-    # PR 2: the technical report sits next to the v1 one, not inside it.
-    assert all(set(c) - V1_CANDIDATE_KEYS == {'evaluation'} for c in report['candidates'])
+    # PR 2 adds the technical report path, PR 5 the hash of the auditioned MIDI.
+    assert all(set(c) - V1_CANDIDATE_KEYS == {'evaluation', 'midi_sha256'}
+               for c in report['candidates'])
     saved = workshop.feedback(ws, {'candidate_id': 'wildcard', 'report': report['report'],
                                    'usefulness': 'use', 'novelty': 'new',
                                    'reason': 'Keeps the pulse'})['feedback']

@@ -176,10 +176,23 @@ doesn't remove a candidate or select a winner. Explicit exclusions still apply
 to every candidate. The hands-and-feet warning is a rough review prompt,
 not a complete test of whether a drummer could play the part.
 
-Audition the candidates through the same verified kit and routing. When live
-insertion is authorized, use the existing bridge workflow with an explicit
-destination and length, preserve occupied material, and verify the inserted
-notes. A structural pass alone doesn't establish musical quality.
+Audition the candidates through the same verified kit and routing. A
+structural pass alone doesn't establish musical quality.
+
+To render with a performer profile, add `"performer": "tight_modern_metal"` or
+`"performer": "raw_black_metal"` to the workshop brief. A profile changes timing
+looseness and the kick velocity band, not the notes, and composers never see
+it. Without a profile, rendering is unchanged. Each profile also sets a kick
+speed. A part whose closest pair of kicks is faster than that gets a warning,
+not an error. Treat the speeds as starting points to adjust after listening.
+
+The evaluation also finds fills: dense tom and snare runs that include a tom.
+It warns when a fill runs over the start of a section, when a fill ends right
+before a section whose downbeat has no kick or cymbal, and when the same fill
+appears three or more times. When a plan asks for a pickup or tom run, a
+section whose last bar has no fill gets an info note. Plan requests also carry
+a transition hint with a suggested length in beats. The wildcard request
+doesn't get one.
 
 ## Record what the user heard
 
@@ -200,6 +213,9 @@ Save the user's feedback in a JSON file:
 python reaperd.py drum-workshop feedback workshop --feedback feedback.json
 ```
 
+Add `"section_id": "chorus"` to say which section the note is about. It must
+name a section of the evaluated candidate.
+
 `usefulness` accepts `use`, `revise` or `reject`. `novelty` accepts `familiar`,
 `new` or `unsure`. The tool binds the record to the evaluated DSL hash, even if
 someone has since edited the working candidate. The caller must supply the
@@ -215,6 +231,49 @@ ignored. Global preferences require `confirmed: true`. Example scope preserves
 an observation without treating it as a general rule. Active preferences appear
 in the evaluation report for judging, not in the fresh composition requests.
 
-The MCP tool `drum_workshop` exposes the same three actions with `path`, optional
-`output`, and an inline `feedback` object. Both surfaces operate on local files
-without contacting REAPER.
+## Revise one section
+
+After a `revise` note on a section, edit that section of the candidate and
+evaluate against the report you heard:
+
+```powershell
+python reaperd.py drum-workshop evaluate workshop --parent evaluation-ID/report.json
+```
+
+Each candidate then lists its changed and unchanged sections. If the revision
+changed a section that no `revise` note asked for, the candidate gets a
+warning. The comparison uses score onsets. Every render re-humanizes velocities
+and timing, so those always differ.
+
+## Put the chosen part in REAPER
+
+Record `use` feedback for the candidate first, then pick it:
+
+```json
+{"candidate_id": "fresh", "report": "evaluation-ID/report.json"}
+```
+
+```powershell
+python reaperd.py drum-workshop pick workshop --feedback choice.json
+```
+
+`pick` checks that the MIDI file still matches the one you heard and returns an
+`insert_midi_file` payload for it. It doesn't contact REAPER. Before inserting,
+check the bridge, resolve the destination track by GUID or verified name, and
+use `dry_run` when unsure. The payload never replaces existing items. Insert
+with `insert_midi_file`, read the take back with `get_midi_notes`, and add the
+result to the choice as `readback`:
+
+```powershell
+python reaperd.py drum-workshop verify workshop --feedback choice-with-readback.json
+```
+
+`verify` compares pitches, velocities and positions with the auditioned MIDI.
+It accounts for REAPER's take resolution. If they differ, one REAPER undo
+removes the insert. REAPER may import MIDI by reference, so keep the workshop
+folder while the item uses the file.
+
+The MCP tool `drum_workshop` exposes the same actions with `path`, optional
+`output` and `parent`, and an inline `feedback` object that also carries the
+`pick` and `verify` records. The workshop itself only reads and writes local
+files; the insert is a separate `insert_midi_file` call.

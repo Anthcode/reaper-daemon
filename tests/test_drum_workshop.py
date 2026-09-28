@@ -323,7 +323,7 @@ def test_plan_workshop_is_version_2_and_splits_the_plan_by_role(tmp_path):
     result = workshop.prepare(plan_brief(tmp_path), ws)
     assert result['candidates'] == ['fresh', 'contrast', 'wildcard']
     manifest = workshop.read_json(ws/'workshop.json')
-    assert manifest['version'] == 2 and manifest['generator_version'] == 1
+    assert manifest['version'] == 2 and manifest['generator_version'] == 2
     assert manifest['brief']['exclude_families'] == ['ride', 'stack']
     assert set(manifest['inputs_sha256']) == {'brief', 'plan_file'}
     fresh = workshop.read_json(ws/'fresh/request.json')['plan']
@@ -394,3 +394,90 @@ def test_changed_plan_snapshot_is_refused(tmp_path):
     (ws/'workshop.json').write_text(json.dumps(manifest))
     with pytest.raises(ValueError, match='version 2'):
         workshop.evaluate(ws)
+
+
+# ---- PR 5: performer, revisions, pick and verify ----
+
+def audition_ready(tmp_path, **changes):
+    write_plan(tmp_path)
+    ws = tmp_path/'ws'
+    workshop.prepare(plan_brief(tmp_path, **changes), ws)
+    populate_plan(ws, ['fresh', 'contrast', 'wildcard'])
+    return ws, workshop.evaluate(ws)
+
+
+def say(ws, report, usefulness='use', **extra):
+    return workshop.feedback(ws, {'candidate_id': 'fresh', 'report': report['report'],
+                                  'usefulness': usefulness, 'novelty': 'new',
+                                  'reason': 'Heard it through the kit', **extra})
+
+
+def test_performer_is_recorded_and_used_for_rendering(tmp_path):
+    ws, report = audition_ready(tmp_path, performer='raw_black_metal')
+    assert workshop.read_json(ws/'workshop.json')['performer']['params']['humanize'] == 30
+    assert 'performer' not in workshop.read_json(ws/'fresh/request.json')
+    evaluation = workshop.read_json(report['candidates'][0]['evaluation'])
+    assert evaluation['metrics']['performer'] == 'raw_black_metal'
+    with pytest.raises(ValueError, match='performer'):
+        workshop.prepare(plan_brief(tmp_path, performer='polka'), tmp_path/'other')
+
+
+def test_section_feedback_names_a_real_section(tmp_path):
+    ws, report = audition_ready(tmp_path)
+    assert say(ws, report, 'revise', section_id='chorus')['feedback']['section_id'] == 'chorus'
+    with pytest.raises(ValueError, match='section_id'):
+        say(ws, report, 'revise', section_id='bridge')
+
+
+def test_revision_reports_which_sections_changed(tmp_path):
+    ws, first = audition_ready(tmp_path)
+    say(ws, first, 'revise', section_id='chorus')
+    (ws/'fresh/candidate.dsl').write_text(plan_dsl(chorus_cymbal='splash'))
+    second = workshop.evaluate(ws, first['report'])
+    assert second['parent_report'] == first['report']
+    change = second['candidates'][0]['revision']
+    assert change['changed_sections'] == ['chorus'] and change['unchanged_sections'] == ['verse']
+    assert 'outside_request' not in change
+    assert second['candidates'][1]['revision']['changed_sections'] == []
+    (ws/'fresh/candidate.dsl').write_text(plan_dsl(verse_cymbal='splash', chorus_cymbal='splash'))
+    third = workshop.evaluate(ws, first['report'])
+    assert third['candidates'][0]['revision']['outside_request'] == ['verse']
+    assert any('did not ask for' in w for w in third['candidates'][0]['warnings'])
+
+
+def test_pick_needs_use_feedback_and_the_untouched_midi(tmp_path):
+    ws, report = audition_ready(tmp_path)
+    choice = {'candidate_id': 'fresh', 'report': report['report']}
+    with pytest.raises(ValueError, match="'use' feedback"):
+        workshop.pick(ws, choice)
+    say(ws, report, 'revise')
+    with pytest.raises(ValueError, match="'use' feedback"):
+        workshop.pick(ws, choice)
+    say(ws, report, 'use')
+    picked = workshop.pick(ws, choice)
+    payload = picked['insert_midi_file']
+    assert payload['midi_path'] == report['candidates'][0]['midi']
+    assert payload['length'] == {'type': 'bars', 'bars': 4}
+    assert payload['replace_existing_in_range'] is False
+    assert picked['expected_notes'] == report['candidates'][0]['notes']
+    Path(payload['midi_path']).write_bytes(b'MThd tampered')
+    with pytest.raises(ValueError, match='changed since the audition'):
+        workshop.pick(ws, choice)
+
+
+def test_verify_compares_reaper_readback_with_the_auditioned_midi(tmp_path):
+    ws, report = audition_ready(tmp_path)
+    frozen = workshop.smf.parse_smf(Path(report['candidates'][0]['midi']).read_bytes())
+    # REAPER reports take-relative ticks at its own resolution.
+    notes = [{'ppq': n['tick'] * 2, 'end_ppq': n['tick'] * 2 + 100, 'pitch': n['pitch'],
+              'velocity': n['vel'], 'muted': False} for n in frozen['notes']]
+    readback = {'ok': True, 'data': {'notes': notes, 'ppq_per_quarter': frozen['ppq'] * 2,
+                                     'truncated': False}}
+    choice = {'candidate_id': 'fresh', 'report': report['report'], 'readback': readback}
+    assert workshop.verify(ws, choice)['ok']
+    readback['data']['notes'] = notes[1:]
+    result = workshop.verify(ws, choice)
+    assert not result['ok'] and result['missing'] == 1 and 'undo' in result['verdict']
+    readback['data']['truncated'] = True
+    with pytest.raises(ValueError, match='truncated'):
+        workshop.verify(ws, choice)
