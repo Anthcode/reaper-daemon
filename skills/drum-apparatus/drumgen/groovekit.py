@@ -445,6 +445,9 @@ def render(sections, params, rng):
     # Kick R/L alternation carries ACROSS sections (it's one pair of feet):
     # a per-section counter put two consecutive right-foot hits at every seam.
     kick_alt_count = 0
+    # The golden rule carries across sections too: a drum is one drum, so the
+    # first hit of a section must differ from the last hit of the one before.
+    prev_v_by_pitch = {}
     for sec in sections:
         grid = sec["grid"]
         feel = sec["feel"]
@@ -659,7 +662,6 @@ def render(sections, params, rng):
         for it in section_intents:
             it["_pitch"] = pitch_for(it["role"])
         section_intents.sort(key=lambda it: it["gstep"])  # stable: lane order kept on ties
-        prev_v_by_pitch = {}
         for it in section_intents:
             pitch = it["_pitch"]
             if pitch is None:
