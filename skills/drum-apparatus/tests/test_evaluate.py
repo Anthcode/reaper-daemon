@@ -163,3 +163,9 @@ def test_groovegen_warns_about_dropped_roles(tmp_path, sparse_kit, capsys):
                            "--out", str(tmp_path / "x.mid"), "--seed", "1"])
     assert code == 0
     assert "no pitch or fallback for CHINA_R" in capsys.readouterr().out
+
+
+def test_user_kick_grid_comparison_has_no_audio_caveat():
+    events, _ = evaluate.structure(groovekit.parse_dsl(dsl(("a", 1, GROOVE))))
+    info = evaluate.kick_riff(events, "x.......x.......", section="a", source="user_explicit")
+    assert info["data"]["coverage"] == 1 and "caveat" not in info["data"]

@@ -2098,7 +2098,7 @@ def tool_drum_workshop(args):
 
 TOOLS.append({
     "name": "drum_workshop",
-    "description": "Plan drum sections from a brief (plan, check-plan), prepare separate composition requests, compare authored drum DSL candidates, export MIDI, or record explicit user audition feedback. Local files only; never changes REAPER. A plan reads audio only from a saved project named in the brief and marks it audio_inferred; the user's sections always win. Fresh and wildcard requests omit reference patterns. The calling agent writes candidate.dsl and intent.json before evaluate. Comparisons measure structural similarity, not musical quality. No model is invoked and no winner is selected.",
+    "description": "Plan drum sections from a brief (plan, check-plan), prepare separate composition requests, compare authored drum DSL candidates, export MIDI, or record explicit user audition feedback. Local files only; never changes REAPER. A plan reads audio only from a saved project named in the brief and marks it audio_inferred; the user's sections always win. A prepare brief may name a plan; each request then gets its part of the plan, and an audio kick sketch reaches only the reference request. Fresh and wildcard requests omit reference patterns. The calling agent writes candidate.dsl and intent.json before evaluate. Comparisons measure structural similarity, not musical quality. No model is invoked and no winner is selected.",
     "inputSchema": _schema({
         "action": {"type": "string", "enum": ["prepare", "evaluate", "feedback", "plan", "check-plan"]},
         "path": {"type": "string", "description": "Brief JSON for prepare or plan; plan JSON for check-plan; workshop folder otherwise"},

@@ -247,7 +247,7 @@ Zadania:
 | 1 | Baseline, schemat planu, fixtures | Brak | Zrobione: 657 testów przechodzi, manifest v1 bez zmian; poprawka Golden Rule między sekcjami |
 | 2 | `evaluate.py` + kontrola mapowania | PR 1 | Zrobione: MIDI z warsztatu identyczne bajt po bajcie jak przed wydzieleniem; nowe bramki: mapowanie, sekcje planu, zakazy per sekcja, kończyny, powtarzalność, kick–riff |
 | 3 | `arrangement.py` (plan offline) | PR 1 | Zrobione: `drum-workshop plan` / `check-plan` (CLI i MCP), plan edytowalny, priorytet użytkownika nad audio, pole `kick_grid` |
-| 4 | Manifest v2 + żądania z planem + granice sekcji | PR 2, PR 3 | 3 kandydatury z wildcardem zgodne z planem |
+| 4 | Manifest v2 + żądania z planem + granice sekcji | PR 2, PR 3 | Zrobione: `drumgen/candidates.py`, manifest v2 ze snapshotem planu, szkic z audio tylko w `reference`, ewaluacja sekcji, zakazów per sekcja i kick–riff |
 | 5 | Fille, `build(params=...)`, profile, rewizje, zapis `.mid` | PR 4 | Zapisane nuty = odsłuchany plik; brak profilu = dotychczasowe MIDI |
 
 PR 2 i PR 3 mogą iść równolegle.

@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'skills' / 'drum-apparatus'))
 from drumgen import arrangement, groovekit, smf  # noqa: E402,F401  (smf re-exported)
 from drumgen.arrangement_schema import validate_plan  # noqa: E402
+from drumgen import candidates  # noqa: E402
 from drumgen.evaluate import (evaluate_candidate, family, structure,  # noqa: E402,F401
                               summary, REPORT_VERSION)
 
@@ -40,6 +41,10 @@ def write_json(path, value):
 
 def digest(text):
     return hashlib.sha256(text.encode('utf-8')).hexdigest()
+
+
+def canonical(value):
+    return json.dumps(value, sort_keys=True, separators=(',', ':'), allow_nan=False)
 
 
 def integer(value, name, low, high):
@@ -98,7 +103,7 @@ def validate_brief(brief):
     if not isinstance(brief, dict):
         raise ValueError('brief must be an object')
     allowed = {'request_id', 'project_id', 'description', 'tempo', 'bars', 'map',
-               'seed', 'exclude_families', 'preferences', 'references'}
+               'seed', 'exclude_families', 'preferences', 'references', 'plan'}
     if set(brief) - allowed:
         raise ValueError(f'Unknown brief fields: {sorted(set(brief) - allowed)}')
     for key in ('request_id', 'project_id', 'description', 'map'):
@@ -115,12 +120,31 @@ def validate_brief(brief):
     refs = brief.get('references', [])
     if not isinstance(refs, list) or len(refs) > 8:
         raise ValueError('references must be a list of at most 8 approved DSL files')
+    if 'plan' in brief:
+        text_value(brief['plan'], 'plan')
     return brief
+
+
+def load_plan(brief, base):
+    """Read and check the brief's plan. Returns (plan text, normalized plan)."""
+    path = Path(brief['plan'])
+    if not path.is_absolute():
+        path = Path(base or '.') / path
+    source = read_text(path)
+    normalized = validate_plan(json.loads(source))
+    got = (normalized['tempo'], normalized['kit_map'], normalized['total_bars'])
+    want = (brief['tempo'], brief['map'], brief['bars'])
+    if got != want:
+        raise ValueError(f'Plan tempo, kit_map and bars {list(got)} must match the brief {list(want)}')
+    return source, normalized
 
 
 def prepare(brief, output, base=None):
     """Freeze a brief and references. Fresh requests contain no reference data."""
     validate_brief(brief)
+    plan_source = plan = None
+    if 'plan' in brief:
+        plan_source, plan = load_plan(brief, base)
     references = []
     for ref in brief.get('references', []):
         if not isinstance(ref, dict) or ref.get('approved') is not True:
@@ -134,8 +158,14 @@ def prepare(brief, output, base=None):
         references.append({'name': name, 'dsl': source, 'sha256': digest(source)})
     context = {k: brief[k] for k in ('request_id', 'project_id')}
     public = {k: brief[k] for k in ('description', 'tempo', 'bars', 'map')}
-    public['exclude_families'] = brief.get('exclude_families', [])
-    roles = ['fresh', 'reference' if references else 'contrast', 'wildcard']
+    public['exclude_families'] = list(brief.get('exclude_families', []))
+    if plan:
+        # The plan's song-wide exclusions bind every candidate like the brief's.
+        public['exclude_families'] += [f for f in plan['exclude_families']
+                                       if f not in public['exclude_families']]
+    sketch = bool(plan) and candidates.has_sketch(plan)
+    # An audio kick sketch is reference material, so it takes the reference seat.
+    roles = ['fresh', 'reference' if references or sketch else 'contrast', 'wildcard']
     requests = []
     for role in roles:
         request = {'candidate_id': role, 'brief': public,
@@ -148,7 +178,9 @@ def prepare(brief, output, base=None):
                    'intent_fields': ['premise', 'development', 'exploration']}
         if role == 'reference':
             request['references'] = references
-            request['direction'] = 'Transform an idea from these references; explain what you changed.'
+            request['direction'] = ('Transform an idea from these references; explain what you changed.'
+                                    if references else
+                                    'Transform the kick sketch in the plan; explain what you changed.')
         elif role == 'wildcard':
             request['direction'] = ('Explore a coherent idea outside the expected treatment. '
                                     'Novelty may come from rhythm, space or form; extra notes are optional.')
@@ -156,12 +188,20 @@ def prepare(brief, output, base=None):
             request['direction'] = 'Explore an independent rhythmic premise; do not vary a sibling candidate.'
         else:
             request['direction'] = 'Compose from this brief alone without reference patterns or sibling candidates.'
+        if plan:
+            request['plan'] = candidates.request_plan(plan, role)
         requests.append(request)
     output = Path(output).resolve()
     output.mkdir(parents=True, exist_ok=False)
     manifest = {'version': 1, 'context': context, 'brief': public,
                 'seed': brief.get('seed', 1), 'candidates': roles, 'references': references,
                 'preferences': active_preferences(brief.get('preferences', []), context)}
+    if plan:
+        raw = json.loads(plan_source)
+        manifest.update(version=2, plan=raw, plan_sha256=digest(canonical(raw)),
+                        generator_version=candidates.GENERATOR_VERSION,
+                        inputs_sha256={'brief': digest(canonical(brief)),
+                                       'plan_file': digest(plan_source)})
     write_json(output / 'workshop.json', manifest)
     for request in requests:
         folder = output / request['candidate_id']
@@ -211,9 +251,19 @@ def local_file(workspace, relative):
 def load_workspace(path):
     workspace = Path(path).resolve()
     manifest = read_json(local_file(workspace, 'workshop.json'))
-    if not isinstance(manifest, dict) or manifest.get('version') != 1 or manifest.get('candidates') not in (
+    # Every version keeps the wildcard: a role list without it is refused.
+    if not isinstance(manifest, dict) or manifest.get('version') not in (1, 2) or manifest.get('candidates') not in (
             ['fresh', 'reference', 'wildcard'], ['fresh', 'contrast', 'wildcard']):
         raise ValueError('Invalid workshop manifest')
+    if (manifest['version'] == 2) != ('plan' in manifest):
+        raise ValueError('Invalid workshop manifest: a plan requires version 2 and version 2 a plan')
+    if manifest['version'] == 2:
+        if digest(canonical(manifest['plan'])) != manifest.get('plan_sha256'):
+            raise ValueError('Plan snapshot changed')
+        plan = manifest['normalized_plan'] = validate_plan(manifest['plan'])
+        brief = manifest['brief']
+        if (plan['tempo'], plan['kit_map'], plan['total_bars']) != (brief['tempo'], brief['map'], brief['bars']):
+            raise ValueError('Invalid workshop manifest: plan and brief disagree')
     validate_brief({**manifest['context'], **manifest['brief'], 'seed': manifest['seed'],
                     'preferences': manifest['preferences']})
     if not isinstance(manifest['references'], list) or len(manifest['references']) > 8:
@@ -245,8 +295,10 @@ def evaluate(path):
                 text_value(intent.get(key), key)
             parsed = parse(source)
             # Keep scores unchanged; render through the existing humanizer.
+            plan = manifest.get('normalized_plan')
             result = evaluate_candidate(source, parsed, manifest['brief'],
-                                        seed=manifest['seed'] + index)
+                                        seed=manifest['seed'] + index, plan=plan,
+                                        riff_kick=candidates.kick_targets(plan) if plan else None)
             findings = result['findings']
             write_json(run / (name + '.evaluation.json'),
                        {'version': REPORT_VERSION, 'candidate_id': name,

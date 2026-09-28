@@ -228,12 +228,12 @@ def render_checked(source, bars, seed):
     return findings, rendered, midi, info
 
 
-def kick_riff(events, riff_kick, grid=16, start_bar=0):
-    """Compare kick onsets with a riff kick grid (riff.onsets_to_kick_grid).
+def kick_riff(events, riff_kick, grid=16, start_bar=0, section=None, source="audio_inferred"):
+    """Compare kick onsets with a kick grid (riff.onsets_to_kick_grid format).
 
-    Returns an info finding: the share of riff onsets a kick lands on (within
-    half a riff step) and the kicks with no riff onset. Always carries the
-    audio caveat.
+    Returns an info finding: the share of grid onsets a kick lands on (within
+    half a step) and the kicks with no onset. start_bar is 0-based. A grid
+    inferred from audio carries the audio caveat; a user-written one doesn't.
     """
     tolerance = Fraction(1, 2 * grid)
     riff = [Fraction(i, grid) + start_bar for i, c in enumerate(riff_kick) if c != "."]
@@ -242,10 +242,16 @@ def kick_riff(events, riff_kick, grid=16, start_bar=0):
     covered = sum(1 for r in riff if any(abs(k - r) <= tolerance for k in kicks))
     extra = sum(1 for k in kicks if not any(abs(k - r) <= tolerance for r in riff))
     share = round(covered / len(riff), 4) if riff else None
+    where = f"[{section}] " if section else ""
+    data = dict(riff_onsets=len(riff), covered=covered, coverage=share,
+                kicks_off_riff=extra, source=source)
+    if section:
+        data["section"] = section
+    if source == "audio_inferred":
+        data["caveat"] = AUDIO_CAVEAT
     return finding("info", "kick_riff",
-                   f"Kick lands on {covered} of {len(riff)} riff onsets; {extra} kicks off the riff",
-                   riff_onsets=len(riff), covered=covered, coverage=share,
-                   kicks_off_riff=extra, caveat=AUDIO_CAVEAT)
+                   f"{where}Kick lands on {covered} of {len(riff)} riff onsets; "
+                   f"{extra} kicks off the riff", **data)
 
 
 def metrics(events, bars, tempo, notes):
@@ -261,7 +267,9 @@ def evaluate_candidate(source, parsed, brief, seed, plan=None, riff_kick=None):
 
     brief: {tempo, map, bars, exclude_families}. plan: a normalized plan from
     arrangement_schema.validate_plan, or None. riff_kick: optional kick grid
-    string from riff analysis. Returns {valid, findings, metrics, midi, rendered}.
+    string from riff analysis over the whole candidate, or a list of
+    {section, start_bar (0-based), grid, source} for section grids.
+    Returns {valid, findings, metrics, midi, rendered}.
     """
     findings, events, bars = check_score(parsed, brief, plan)
     midi, rendered = None, []
@@ -270,8 +278,13 @@ def evaluate_candidate(source, parsed, brief, seed, plan=None, riff_kick=None):
         findings.extend(more)
         if midi is None and not any(f["level"] == "error" for f in findings):
             findings.append(finding("error", "empty", "Nothing rendered to MIDI"))
-    if riff_kick:
+    if isinstance(riff_kick, str) and riff_kick:
         findings.append(kick_riff(events, riff_kick))
+    elif riff_kick:
+        for target in riff_kick:
+            findings.append(kick_riff(events, target["grid"], start_bar=target["start_bar"],
+                                      section=target.get("section"),
+                                      source=target.get("source", "audio_inferred")))
     valid = midi is not None and not any(f["level"] == "error" for f in findings)
     return {"valid": valid, "findings": findings,
             "metrics": metrics(events, bars, brief["tempo"], len(rendered)),

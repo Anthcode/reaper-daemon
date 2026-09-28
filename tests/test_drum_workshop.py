@@ -276,3 +276,121 @@ def test_plan_and_check_plan_share_one_path_on_cli_and_mcp(tmp_path, monkeypatch
     assert ok['sections'][1]['effective_exclusions'] == ['choke', 'ride']
     with pytest.raises(FileExistsError):
         workshop.run('plan', str(path), str(tmp_path/'cli.json'))
+
+
+# ---- PR 4: workshops built on an arrangement plan ----
+
+def write_plan(tmp_path, kick_grid=None, grid_source=None, name='plan.json'):
+    """A two-section plan; optionally a verse kick grid from the planner."""
+    arrangement = {'tempo': 182, 'kit_map': 'RS Monarch', 'exclude_families': ['stack'],
+                   'sections': [{'id': 'verse', 'bars': 2, 'role': 'verse',
+                                 'kick_strategy': 'riff_selective', 'energy': 0.5},
+                                {'id': 'chorus', 'bars': 2, 'role': 'chorus',
+                                 'exclude_families': ['china']}]}
+    observations = None
+    if grid_source == 'user_explicit':
+        arrangement['sections'][0]['kick_grid'] = kick_grid
+    elif grid_source == 'audio_inferred':
+        observations = {'kick_grid': kick_grid + '.' * 32}
+    from drumgen.arrangement import build_plan
+    plan = build_plan(arrangement, observations)['plan']
+    (tmp_path/name).write_text(json.dumps(plan))
+    return name
+
+
+def plan_dsl(verse_cymbal='crash_l', chorus_cymbal='crash_r', names=('verse', 'chorus')):
+    lanes = 'grid 16\nkick | X..x..x.X..x..x. |\nsnare | ........X....... |\n'
+    return (f'@tempo 182\n@map RS Monarch\n'
+            f'[{names[0]}] bars=2 feel=f\n{lanes}{verse_cymbal} | X.......x....... |\n'
+            f'[{names[1]}] bars=2 feel=f\n{lanes}{chorus_cymbal} | X.......x....... |\n')
+
+
+def populate_plan(workspace, roles, sources=None):
+    for i, role in enumerate(roles):
+        source = (sources or {}).get(role, plan_dsl(chorus_cymbal=['crash_r', 'crash_l', 'splash'][i]))
+        (workspace/role/'candidate.dsl').write_text(source)
+        (workspace/role/'intent.json').write_text(json.dumps(
+            {'premise': 'p', 'development': 'd', 'exploration': 'e'}))
+
+
+def plan_brief(tmp_path, **changes):
+    return brief(exclude_families=['ride'], plan=str(tmp_path/'plan.json'), **changes)
+
+
+def test_plan_workshop_is_version_2_and_splits_the_plan_by_role(tmp_path):
+    write_plan(tmp_path)
+    ws = tmp_path/'ws'
+    result = workshop.prepare(plan_brief(tmp_path), ws)
+    assert result['candidates'] == ['fresh', 'contrast', 'wildcard']
+    manifest = workshop.read_json(ws/'workshop.json')
+    assert manifest['version'] == 2 and manifest['generator_version'] == 1
+    assert manifest['brief']['exclude_families'] == ['ride', 'stack']
+    assert set(manifest['inputs_sha256']) == {'brief', 'plan_file'}
+    fresh = workshop.read_json(ws/'fresh/request.json')['plan']
+    wildcard = workshop.read_json(ws/'wildcard/request.json')['plan']
+    assert [s['id'] for s in fresh['sections']] == ['verse', 'chorus']
+    assert fresh['sections'][0]['kick_strategy'] == 'riff_selective'
+    assert 'kick_strategy' not in wildcard['sections'][0] and 'energy' not in wildcard['sections'][0]
+    assert wildcard['sections'][1]['effective_exclusions'] == ['china', 'stack']
+    assert fresh['plan_direction'].startswith('tight') and 'breathing' in \
+        workshop.read_json(ws/'contrast/request.json')['plan']['plan_direction']
+
+
+def test_audio_kick_sketch_goes_only_to_the_reference_request(tmp_path):
+    sketch = 'x..x....x..x....' * 2
+    write_plan(tmp_path, sketch, 'audio_inferred')
+    ws = tmp_path/'ws'
+    assert workshop.prepare(plan_brief(tmp_path), ws)['candidates'] == ['fresh', 'reference', 'wildcard']
+    requests = {r: workshop.read_json(ws/r/'request.json') for r in ('fresh', 'reference', 'wildcard')}
+    assert requests['reference']['plan']['sections'][0]['kick_sketch']['grid'] == sketch
+    assert requests['reference']['reference_access'] and 'sketch' in requests['reference']['direction']
+    for role in ('fresh', 'wildcard'):
+        assert sketch not in json.dumps(requests[role]) and not requests[role]['reference_access']
+
+
+def test_user_kick_grid_binds_every_request(tmp_path):
+    grid = 'x.......x.......' * 2
+    write_plan(tmp_path, grid, 'user_explicit')
+    ws = tmp_path/'ws'
+    assert workshop.prepare(plan_brief(tmp_path), ws)['candidates'] == ['fresh', 'contrast', 'wildcard']
+    for role in ('fresh', 'contrast', 'wildcard'):
+        assert workshop.read_json(ws/role/'request.json')['plan']['sections'][0]['kick_grid'] == grid
+
+
+def test_plan_must_match_the_brief(tmp_path):
+    write_plan(tmp_path)
+    with pytest.raises(ValueError, match='must match the brief'):
+        workshop.prepare(plan_brief(tmp_path, bars=8), tmp_path/'ws')
+    assert not (tmp_path/'ws').exists()
+
+
+def test_evaluation_holds_candidates_to_the_plan(tmp_path):
+    write_plan(tmp_path, 'x..x..x.x..x..x.' * 2, 'audio_inferred')
+    ws = tmp_path/'ws'
+    workshop.prepare(plan_brief(tmp_path), ws)
+    populate_plan(ws, ['fresh', 'reference', 'wildcard'], {
+        'reference': plan_dsl(names=('verse', 'bridge')),
+        'wildcard': plan_dsl(chorus_cymbal='china')})
+    report = workshop.evaluate(ws)
+    assert report['audition_candidates'] == ['fresh']
+    assert 'plan' in report['candidates'][1]['error']
+    assert 'chorus' in report['candidates'][2]['error']
+    fresh = workshop.read_json(report['candidates'][0]['evaluation'])
+    (riff,) = [f for f in fresh['findings'] if f['check'] == 'kick_riff']
+    assert riff['data']['section'] == 'verse' and riff['data']['coverage'] == 1
+    assert 'saved .rpp' in riff['data']['caveat']
+
+
+def test_changed_plan_snapshot_is_refused(tmp_path):
+    write_plan(tmp_path)
+    ws = tmp_path/'ws'
+    workshop.prepare(plan_brief(tmp_path), ws)
+    manifest = workshop.read_json(ws/'workshop.json')
+    manifest['plan']['sections'][1]['exclude_families'] = []
+    (ws/'workshop.json').write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='Plan snapshot changed'):
+        workshop.evaluate(ws)
+    del manifest['plan']
+    (ws/'workshop.json').write_text(json.dumps(manifest))
+    with pytest.raises(ValueError, match='version 2'):
+        workshop.evaluate(ws)

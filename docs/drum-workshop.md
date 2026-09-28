@@ -91,6 +91,29 @@ intent.
 Plans are 4/4, 40 to 320 BPM and at most 64 bars. Split a longer song into
 several plans. A family that one section both requires and excludes is an error.
 
+## Prepare from a plan
+
+Add the plan file to the workshop brief as `"plan": "plan.json"`. The brief's
+tempo, map and bar count must match the plan. The workshop then writes a
+version 2 manifest with a snapshot of the plan, and each `request.json` gets
+the part of the plan its composer may see:
+
+| Request | Sees |
+| --- | --- |
+| fresh, contrast | Sections, bars, exclusions, required families, your kick grids, and your strategies, energy and transitions |
+| wildcard | The same, without strategies, energy or transitions |
+| reference | Everything fresh sees, plus any kick grid inferred from audio, as a sketch |
+
+A kick grid inferred from audio counts as reference material. When the plan has
+one, the reference request replaces contrast, even without reference DSL files,
+and only that request sees the sketch. A kick grid you wrote yourself is an
+instruction, so every request gets it.
+
+Write one DSL section per plan section, in order, with the plan's section id
+and bar count. Evaluation rejects a candidate whose sections differ from the
+plan or that uses a family excluded in that section. For every section with a
+kick grid, it reports how many of the grid's onsets the kick lands on.
+
 ## Compose without leaking the examples
 
 Give each composer only its `request.json`, the drum DSL syntax and the kit
