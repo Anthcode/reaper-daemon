@@ -11,7 +11,8 @@ import uuid
 
 ROOT = Path(__file__).resolve().parent
 sys.path.insert(0, str(ROOT / 'skills' / 'drum-apparatus'))
-from drumgen import groovekit, smf  # noqa: E402,F401  (smf re-exported)
+from drumgen import arrangement, groovekit, smf  # noqa: E402,F401  (smf re-exported)
+from drumgen.arrangement_schema import validate_plan  # noqa: E402
 from drumgen.evaluate import (evaluate_candidate, family, structure,  # noqa: E402,F401
                               summary, REPORT_VERSION)
 
@@ -326,7 +327,48 @@ def feedback(path, record):
     return {'ok': True, 'path': str(output), 'feedback': saved}
 
 
+def plan(path, output):
+    """Build an editable ArrangementPlan from an arrangement brief.
+
+    Reads audio only when the brief names a saved project under `riff`; the
+    plan file holds only the plan, so it can be edited and checked again.
+    """
+    base = Path(path).resolve().parent
+    brief = read_json(path)
+    observations = None
+    if isinstance(brief, dict) and isinstance(brief.get('riff'), dict):
+        riff = dict(brief['riff'])
+        rpp = Path(text_value(riff.get('rpp'), 'riff rpp'))
+        riff['rpp'] = str(rpp if rpp.is_absolute() else base / rpp)
+        total = arrangement.plan_total_bars(brief)
+        integer(total, 'plan bars', 1, 64)
+        observations = arrangement.observe(riff, total)
+    result = arrangement.build_plan(brief, observations)
+    output = Path(output).resolve()
+    write_json(output, result['plan'])
+    return {'ok': True, 'plan': str(output), 'total_bars': result['normalized']['total_bars'],
+            'sections': [{k: s[k] for k in ('id', 'start_bar', 'bars', 'evidence')}
+                         for s in result['normalized']['sections']],
+            'caveats': result['normalized']['caveats'],
+            'disagreements': result['disagreements'],
+            'planner_version': result['planner_version']}
+
+
+def check_plan(path):
+    normalized = validate_plan(read_json(path))
+    return {'ok': True, 'total_bars': normalized['total_bars'],
+            'sections': [{k: s[k] for k in ('id', 'start_bar', 'bars', 'effective_exclusions')}
+                         for s in normalized['sections']],
+            'caveats': normalized['caveats']}
+
+
 def run(action, path, output=None, record=None):
+    if action == 'plan':
+        if not output:
+            raise ValueError('plan requires output')
+        return plan(path, output)
+    if action == 'check-plan':
+        return check_plan(path)
     if action == 'prepare':
         if not output:
             raise ValueError('prepare requires output')
@@ -351,8 +393,10 @@ def cli(args):
 
 def add_parser(sub):
     parser = sub.add_parser('drum-workshop', help='Prepare and compare drum ideas without changing REAPER')
-    parser.add_argument('action', choices=['prepare', 'evaluate', 'feedback'])
-    parser.add_argument('path', help='Brief JSON for prepare; workshop folder otherwise')
-    parser.add_argument('--output', help='New workshop folder for prepare')
+    parser.add_argument('action', choices=['prepare', 'evaluate', 'feedback',
+                                           'plan', 'check-plan'])
+    parser.add_argument('path', help='Brief JSON for prepare or plan; plan JSON for '
+                                     'check-plan; workshop folder otherwise')
+    parser.add_argument('--output', help='New workshop folder for prepare; new plan file for plan')
     parser.add_argument('--feedback', help='User feedback JSON for feedback')
     parser.set_defaults(func=cli)

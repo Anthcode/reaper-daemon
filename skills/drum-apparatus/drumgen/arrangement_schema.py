@@ -38,7 +38,9 @@ PLAN_FIELDS = {"schema_version", "tempo", "meter", "kit_map", "seed",
                "exclude_families", "sections"}
 SECTION_FIELDS = {"id", "start_bar", "bars", "role", "energy", "kick_strategy",
                   "snare_strategy", "cymbal_strategy", "exclude_families",
-                  "require_families", "transition_out", "evidence"}
+                  "require_families", "transition_out", "kick_grid", "evidence"}
+# A section's kick_grid is one cell per 16th, like riff.onsets_to_kick_grid.
+KICK_GRID_STEPS = 16
 SLUG_FIELDS = ("role", "kick_strategy", "snare_strategy", "cymbal_strategy",
                "transition_out")
 _SLUG = re.compile(r"^[a-z][a-z0-9_]{0,47}$")
@@ -122,6 +124,11 @@ def validate_plan(plan):
         if energy is not None and (type(energy) not in (int, float)
                                    or energy != energy or not 0 <= energy <= 1):
             raise PlanError(f"{sid}.energy must be a number from 0 to 1")
+        grid = section.get("kick_grid")
+        if grid is not None and (not isinstance(grid, str) or set(grid) - {"x", "."}
+                                 or len(grid) != bars * KICK_GRID_STEPS):
+            raise PlanError(f"{sid}.kick_grid must be {bars * KICK_GRID_STEPS} cells "
+                            "of 'x' or '.' (one per 16th)")
         excluded = _families(section.get("exclude_families", []), f"{sid}.exclude_families")
         required = _families(section.get("require_families", []), f"{sid}.require_families")
         effective = sorted(set(global_excluded) | set(excluded))

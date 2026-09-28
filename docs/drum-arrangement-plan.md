@@ -100,6 +100,7 @@ Projektowany kontrakt (nie jest jeszcze formatem repozytorium):
       "cymbal_strategy": "closed_hat",
       "exclude_families": ["ride"],
       "transition_out": "short_pickup",
+      "kick_grid": "x..x..x.x..x..x.…",
       "evidence": {
         "section_boundary": "user_explicit",
         "kick_grid": "audio_inferred"
@@ -118,6 +119,7 @@ Wymagania:
 - `exclude_families` globalne i per sekcja; sekcyjne sumują się z globalnymi. Sprzeczność (nakaz i zakaz tej samej rodziny w sekcji) jest błędem.
 - `evidence` przyjmuje `user_explicit`, `audio_inferred` albo `default`. `audio_inferred` zawsze niesie zastrzeżenie, że źródłem był zapisany `.rpp`, a nie stan na żywo.
 - Ręczny brief i twarde wykluczenia mają pierwszeństwo nad heurystykami.
+- `kick_grid` (opcjonalny): jedna komórka `x`/`.` na szesnastkę przez całą sekcję, w formacie `riff.onsets_to_kick_grid`.
 - Ten sam plan, wersja generatora i seed dają identyczny wynik.
 
 ### 3.2. Workshop i kandydatura
@@ -244,7 +246,7 @@ Zadania:
 |---|---|---|---|
 | 1 | Baseline, schemat planu, fixtures | Brak | Zrobione: 657 testów przechodzi, manifest v1 bez zmian; poprawka Golden Rule między sekcjami |
 | 2 | `evaluate.py` + kontrola mapowania | PR 1 | Zrobione: MIDI z warsztatu identyczne bajt po bajcie jak przed wydzieleniem; nowe bramki: mapowanie, sekcje planu, zakazy per sekcja, kończyny, powtarzalność, kick–riff |
-| 3 | `arrangement.py` (plan offline) | PR 1 | Plan deterministyczny, walidacja 4/4 i ≤ 64 taktów |
+| 3 | `arrangement.py` (plan offline) | PR 1 | Zrobione: `drum-workshop plan` / `check-plan` (CLI i MCP), plan edytowalny, priorytet użytkownika nad audio, pole `kick_grid` |
 | 4 | Manifest v2 + żądania z planem + granice sekcji | PR 2, PR 3 | 3 kandydatury z wildcardem zgodne z planem |
 | 5 | Fille, `build(params=...)`, profile, rewizje, zapis `.mid` | PR 4 | Zapisane nuty = odsłuchany plik; brak profilu = dotychczasowe MIDI |
 

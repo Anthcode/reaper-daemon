@@ -246,3 +246,33 @@ def test_unmapped_roles_fail_the_candidate_instead_of_vanishing(tmp_path, monkey
     # crash_l falls back to CRASH_R; the wildcard's china has nowhere to go.
     assert report['audition_candidates'] == ['fresh', 'contrast']
     assert 'cannot play' in report['candidates'][2]['error']
+
+
+def test_plan_and_check_plan_share_one_path_on_cli_and_mcp(tmp_path, monkeypatch):
+    import reaper_mcp
+    monkeypatch.setattr(reaper_mcp, '_send', lambda *a, **k: pytest.fail('No bridge calls allowed'))
+    path = tmp_path/'arrangement.json'
+    path.write_text(json.dumps({'tempo': 182, 'kit_map': 'RS Monarch', 'exclude_families': ['choke'],
+                                'sections': [{'id': 'verse', 'bars': 8, 'role': 'verse'},
+                                             {'id': 'breakdown', 'bars': 4, 'role': 'breakdown',
+                                              'exclude_families': ['ride']}]}))
+    command = subprocess.run([sys.executable, str(workshop.ROOT/'reaperd.py'), 'drum-workshop',
+                              'plan', str(path), '--output', str(tmp_path/'cli.json')],
+                             capture_output=True, text=True)
+    assert command.returncode == 0, command.stderr
+    summary = json.loads(command.stdout)
+    assert summary['total_bars'] == 12 and summary['caveats'] == []
+    response = reaper_mcp.tool_drum_workshop({'action': 'plan', 'path': str(path),
+                                            'output': str(tmp_path/'mcp.json')})
+    assert not response.get('isError')
+    assert workshop.read_json(tmp_path/'cli.json') == workshop.read_json(tmp_path/'mcp.json')
+    # The plan file is the plan itself: edit it and check it again.
+    edited = workshop.read_json(tmp_path/'cli.json')
+    edited['sections'][1]['require_families'] = ['ride']
+    (tmp_path/'edited.json').write_text(json.dumps(edited))
+    checked = reaper_mcp.tool_drum_workshop({'action': 'check-plan', 'path': str(tmp_path/'edited.json')})
+    assert checked.get('isError') and 'both requires and excludes' in checked['content'][0]['text']
+    ok = workshop.run('check-plan', str(tmp_path/'mcp.json'))
+    assert ok['sections'][1]['effective_exclusions'] == ['choke', 'ride']
+    with pytest.raises(FileExistsError):
+        workshop.run('plan', str(path), str(tmp_path/'cli.json'))

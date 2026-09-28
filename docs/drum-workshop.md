@@ -51,6 +51,46 @@ Paths are relative to the brief file unless absolute. The workshop stores a
 snapshot, so editing the original reference later won't change the comparison.
 Use `approved: true` only for material the user has actually approved.
 
+## Plan the sections
+
+Before composing a whole song, you can write an arrangement brief and turn it
+into a plan of sections:
+
+```json
+{
+  "tempo": 182,
+  "kit_map": "RS Monarch",
+  "exclude_families": ["choke"],
+  "sections": [
+    {"id": "verse", "bars": 8, "role": "verse", "kick_strategy": "riff_selective"},
+    {"id": "breakdown", "bars": 4, "role": "breakdown", "exclude_families": ["ride"]}
+  ],
+  "riff": {"rpp": "song.rpp", "track": "GTR_DI"}
+}
+```
+
+```powershell
+python reaperd.py drum-workshop plan arrangement.json --output plan.json
+python reaperd.py drum-workshop check-plan plan.json
+```
+
+The plan file contains the plan only, so you can edit it and run `check-plan`
+again. Every section records where each decision came from: `user_explicit`
+for what you wrote, `audio_inferred` for what riff analysis suggested, and
+`default` otherwise. Instead of `sections`, you can give `total_bars` and let the
+riff analysis propose where sections start. Without a riff, that gives one
+section.
+
+The optional `riff` reads the first audio item of a track in a saved project
+file, not the live project. It proposes section starts and a kick grid for each
+section. Your sections and kick grids always win. When the audio disagrees, the
+result lists the disagreement and keeps your value. Audio-based choices come
+with a caveat, because an onset detector's reading isn't a transcription of
+intent.
+
+Plans are 4/4, 40 to 320 BPM and at most 64 bars. Split a longer song into
+several plans. A family that one section both requires and excludes is an error.
+
 ## Compose without leaking the examples
 
 Give each composer only its `request.json`, the drum DSL syntax and the kit
