@@ -1,3 +1,4 @@
+import csv
 import json
 from pathlib import Path
 
@@ -145,3 +146,77 @@ def test_load_rig_reports_bad_json(tmp_path):
     path.write_text('{"schema_version": 1,', encoding='utf-8')
     with pytest.raises(ValueError, match='not valid JSON'):
         load_rig(path)
+
+
+def effect_fixture(**extra):
+    fx = {'id': 'effect_left', 'name': 'Effect left', 'type': 'effect', 'role': 'effect',
+          'position': 'stage_left', 'address': 60,
+          'channels': ['unknown', 'motor_1', 'motor_2', 'unknown', 'strobe', 'unknown']}
+    fx.update(extra)
+    return fx
+
+
+def test_unknown_slots_and_motors(rig):
+    rig['fixtures'].append(effect_fixture(confidence='inferred', profile='Effect.dmx'))
+    assert validate_rig(rig) == []
+    fx = fixture_result(rig, 'effect_left')
+    assert fx['footprint'] == 6
+    assert fx['unknown_channels'] == [60, 63, 65]
+    assert fx['channel_map'] == {'motor_1': 61, 'motor_2': 62, 'strobe': 64}
+    assert 'movement' in fx['capabilities']
+    assert (fx['confidence'], fx['profile']) == ('inferred', 'Effect.dmx')
+
+
+def test_automation_tracks_stay_inside_footprint(rig):
+    rig['fixtures'].append(effect_fixture(automation_tracks={'61': 'Motor L', '64': 'Strobe L'}))
+    assert validate_rig(rig) == []
+    assert fixture_result(rig, 'effect_left')['automation_tracks'] == {61: 'Motor L', 64: 'Strobe L'}
+    rig['fixtures'][-1]['automation_tracks'] = {'66': 'Outside', '62': ''}
+    errors = validate_rig(rig)
+    assert any("key '66' is not a channel in 60-65" in e for e in errors)
+    assert any("automation_tracks['62'] must be a non-empty track name" in e for e in errors)
+
+
+def test_one_track_drives_one_fixture(rig):
+    fixture(rig, 'bar_back')['automation_tracks'] = {'13': 'Wash'}
+    rig['fixtures'].append(effect_fixture(automation_tracks={'61': 'Wash'}))
+    assert any("track 'Wash' already drives fixture 'bar_back'" in e for e in validate_rig(rig))
+
+
+def test_profile_and_confidence_values(rig):
+    rig['fixtures'].append(effect_fixture(profile='C:/fixtures/Effect.dmx', confidence='guess'))
+    errors = validate_rig(rig)
+    assert any('profile must be a bare file name' in e for e in errors)
+    assert any('confidence must be one of config, inferred' in e for e in errors)
+
+
+DMXIS = Path(__file__).resolve().parent / 'fixtures/lighting'
+CSV_FIXTURES = {'Par11': 'par_1', 'Par21': 'par_2', 'Spider 1': 'spider_1', 'Spider 2': 'spider_2',
+                'Par 3': 'par_3'}
+CSV_KINDS = {'lewy': 'motor_1', 'prawy': 'motor_2', 'w.p2': 'unknown'}
+
+
+def test_dmxis_rig_matches_channel_map_csv():
+    result = load_rig(DMXIS / 'dmxis_rig.json')
+    by_id = {fx['id']: fx for fx in result['fixtures']}
+    rows = list(csv.reader((DMXIS / 'dmxis_channel_map.csv').read_text(encoding='utf-8-sig').splitlines(),
+                           delimiter=';'))[1:]
+    tracks = 0
+    for channel, name, profile, function, certainty in rows:
+        channel = int(channel)
+        fx = by_id[CSV_FIXTURES[name.split(' (')[0]]]
+        assert fx['address'] <= channel <= fx['end_address']
+        assert fx['profile'] == profile.rstrip('?')
+        assert fx['confidence'] == ('config' if certainty.startswith('z configu') else 'inferred')
+        label = function.split(' (')[0].casefold()
+        kind = CSV_KINDS.get(label, label)
+        if kind == 'unknown':
+            assert channel in fx['unknown_channels']
+        else:
+            assert fx['channel_map'][kind] == channel
+        if '(track: ' in function:
+            assert fx['automation_tracks'][channel] == function.split('(track: ')[1].rstrip(')')
+            tracks += 1
+    assert tracks == sum(len(fx['automation_tracks']) for fx in result['fixtures'])
+    assert result['safety']['strobe_enabled'] is False
+    assert not any(fx['strobe_allowed'] for fx in result['fixtures'])

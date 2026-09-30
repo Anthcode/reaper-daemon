@@ -1,0 +1,19 @@
+﻿Kanał DMX;Fixtura;Plik fixtury;Funkcja / track automatyzacji;Pewność
+1;Par11;Par1.dmx;Red;z configu
+2;Par11;Par1.dmx;Green;z configu
+3;Par11;Par1.dmx;Blue;z configu
+4;Par11;Par1.dmx;White;z configu
+5;Par11;Par1.dmx;Strobe (track: strobo-prawy);z configu + track
+9;Par21;Par2.dmx;Red (track: 9);z configu
+10;Par21;Par2.dmx;Green;z configu
+11;Par21;Par2.dmx;Blue;z configu
+12;Par21;Par2.dmx;White;z configu
+13;Par21;Par2.dmx;Strobe (track: strobo-lewy);z configu + track
+21;Spider 1 (start 17);Spider-lewy.dmx;Lewy (track: Pan1L);wniosek
+22;Spider 1 (start 17);Spider-lewy.dmx;Prawy (track: Pan1R);wniosek
+25;Spider 1 (start 17);Spider-lewy.dmx;strobe (track: Move strobe left);wniosek
+63;Spider 2 (start 59);Spider-lewy.dmx;Lewy (track: Pan2R);wniosek
+64;Spider 2 (start 59);Spider-lewy.dmx;Prawy (track: Pan2L);wniosek
+67;Spider 2 (start 59);Spider-lewy.dmx;strobe (track: Move strobe right);wniosek
+73;Spider 2 (start 59);Spider-lewy.dmx;W.P2 (track: 73);wniosek
+106;Par 3 (start ok. 102);Par1.dmx?;Strobe (track: strobo-tył);wniosek

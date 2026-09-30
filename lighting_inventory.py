@@ -7,24 +7,27 @@ from pathlib import Path
 SCHEMA_VERSION = 1
 UNIVERSE_SIZE = 512
 CONTROLLERS = ('dmxis',)
-FIXTURE_TYPES = ('par', 'wash', 'bar', 'spot', 'moving_head', 'blinder', 'strobe', 'hazer')
+FIXTURE_TYPES = ('par', 'wash', 'bar', 'spot', 'moving_head', 'effect', 'blinder', 'strobe', 'hazer')
 ROLES = ('front_wash', 'back_wash', 'side_wash', 'key', 'spot', 'audience', 'effect', 'ambient', 'atmosphere')
 POSITIONS = ('stage_left', 'stage_right', 'center', 'upstage', 'downstage', 'floor', 'truss', 'drum_riser')
 CHANNEL_KINDS = ('dimmer', 'red', 'green', 'blue', 'white', 'amber', 'uv', 'color_wheel', 'gobo',
-                 'pan', 'pan_fine', 'tilt', 'tilt_fine', 'speed', 'zoom', 'focus', 'strobe', 'shutter',
-                 'macro', 'mode', 'fog', 'fan', 'control')
-# Capability -> channel kinds that must all be present.
-CAPABILITIES = {'dimmer': ('dimmer',), 'rgb': ('red', 'green', 'blue'), 'white': ('white',),
-                'amber': ('amber',), 'uv': ('uv',), 'color_wheel': ('color_wheel',), 'gobo': ('gobo',),
-                'movement': ('pan', 'tilt'), 'zoom': ('zoom',), 'strobe': ('strobe',),
-                'shutter': ('shutter',), 'atmosphere': ('fog',)}
+                 'pan', 'pan_fine', 'tilt', 'tilt_fine', 'motor_1', 'motor_2', 'speed', 'zoom', 'focus',
+                 'strobe', 'shutter', 'macro', 'mode', 'fog', 'fan', 'control', 'unknown')
+# 'unknown' fills footprint slots whose function is not known yet; it may repeat.
+UNKNOWN = 'unknown'
+CONFIDENCE = ('config', 'inferred')
+# Capability -> alternative sets of channel kinds; any one complete set grants it.
+CAPABILITIES = {'dimmer': (('dimmer',),), 'rgb': (('red', 'green', 'blue'),), 'white': (('white',),),
+                'amber': (('amber',),), 'uv': (('uv',),), 'color_wheel': (('color_wheel',),),
+                'gobo': (('gobo',),), 'movement': (('pan', 'tilt'), ('motor_1',)), 'zoom': (('zoom',),),
+                'strobe': (('strobe',),), 'shutter': (('shutter',),), 'atmosphere': (('fog',),)}
 FLASH_KINDS = ('strobe', 'shutter')
 _ID_RE = re.compile(r'^[a-z][a-z0-9_]{0,47}$')
 _TOP_KEYS = {'schema_version', 'rig', 'safety', 'fixtures'}
 _RIG_KEYS = {'name', 'controller', 'universe', 'universe_size'}
 _SAFETY_KEYS = {'strobe_enabled', 'max_intensity', 'atmosphere_enabled'}
 _FIXTURE_KEYS = {'id', 'name', 'type', 'role', 'position', 'address', 'channels', 'enabled',
-                 'max_intensity', 'strobe_allowed', 'notes'}
+                 'max_intensity', 'strobe_allowed', 'profile', 'confidence', 'automation_tracks', 'notes'}
 CAVEAT = ('Declared configuration only. Nothing was sent to any fixture, controller, or dmXis '
           'instance; addresses and channel layouts are not verified against hardware.')
 
@@ -90,7 +93,7 @@ def validate_rig(data):
     if not isinstance(fixtures, list) or not fixtures:
         errors.append('fixtures must be a non-empty list')
         return errors
-    seen_ids, occupied = set(), {}
+    seen_ids, occupied, seen_tracks = set(), {}, {}
     for index, fx in enumerate(fixtures):
         where = f'fixtures[{index}]'
         if not isinstance(fx, dict):
@@ -112,6 +115,11 @@ def validate_rig(data):
                 errors.append(f'{where}: {key} must be one of {", ".join(allowed)}')
         if 'notes' in fx and not isinstance(fx['notes'], str):
             errors.append(f'{where}: notes must be a string')
+        profile = fx.get('profile', '')
+        if not isinstance(profile, str) or '/' in profile or '\\' in profile:
+            errors.append(f'{where}: profile must be a bare file name, not a path')
+        if fx.get('confidence', 'config') not in CONFIDENCE:
+            errors.append(f'{where}: confidence must be one of {", ".join(CONFIDENCE)}')
         enabled = fx.get('enabled', True)
         if not isinstance(enabled, bool):
             errors.append(f'{where}: enabled must be true or false')
@@ -133,7 +141,7 @@ def validate_rig(data):
         bad = [c for c in channels if c not in CHANNEL_KINDS]
         if bad:
             errors.append(f'{where}: unknown channel kinds {bad}')
-        dupes = sorted({c for c in channels if isinstance(c, str) and channels.count(c) > 1})
+        dupes = sorted({c for c in channels if isinstance(c, str) and c != UNKNOWN and channels.count(c) > 1})
         if dupes:
             errors.append(f'{where}: channel kinds listed twice {dupes}')
         if enabled is True and fx.get('type') == 'strobe' and not strobe_on:
@@ -151,6 +159,19 @@ def validate_rig(data):
         if end > size:
             errors.append(f'{where}: channels {address}-{end} run past universe size {size}')
             continue
+        tracks = fx.get('automation_tracks', {})
+        if not isinstance(tracks, dict):
+            errors.append(f'{where}: automation_tracks must map DMX channel to track name')
+            tracks = {}
+        for key, track in tracks.items():
+            if not key.isdigit() or not address <= int(key) <= end:
+                errors.append(f'{where}: automation_tracks key {key!r} is not a channel in {address}-{end}')
+            if not isinstance(track, str) or not track.strip():
+                errors.append(f'{where}: automation_tracks[{key!r}] must be a non-empty track name')
+            elif track in seen_tracks:
+                errors.append(f'{where}: track {track!r} already drives fixture {seen_tracks[track]!r}')
+            else:
+                seen_tracks[track] = fid
         for ch in range(address, end + 1):
             if ch in occupied:
                 errors.append(f'{where}: DMX channel {ch} already used by fixture {occupied[ch]!r}')
@@ -183,14 +204,20 @@ def rig_inventory(data):
         end = fx['address'] + len(channels) - 1
         used.update(range(fx['address'], end + 1))
         enabled = fx.get('enabled', True)
-        caps = [cap for cap, need in CAPABILITIES.items() if all(k in channels for k in need)]
+        caps = [cap for cap, options in CAPABILITIES.items()
+                if any(all(k in channels for k in need) for need in options)]
         flash = [k for k in FLASH_KINDS if k in channels]
         strobe_allowed = enabled and safety['strobe_enabled'] and fx.get('strobe_allowed', False)
         fixtures.append({
             'id': fx['id'], 'name': fx['name'], 'type': fx['type'], 'role': fx['role'],
             'position': fx['position'], 'enabled': enabled,
             'address': fx['address'], 'end_address': end, 'footprint': len(channels),
-            'channel_map': {kind: fx['address'] + offset for offset, kind in enumerate(channels)},
+            'channel_map': {kind: fx['address'] + offset for offset, kind in enumerate(channels)
+                            if kind != UNKNOWN},
+            'unknown_channels': [fx['address'] + offset for offset, kind in enumerate(channels)
+                                 if kind == UNKNOWN],
+            'automation_tracks': {int(ch): track for ch, track in fx.get('automation_tracks', {}).items()},
+            'profile': fx.get('profile'), 'confidence': fx.get('confidence', 'config'),
             'capabilities': caps,
             'max_intensity': min(fx.get('max_intensity', safety['max_intensity']), safety['max_intensity']),
             'strobe_allowed': strobe_allowed,

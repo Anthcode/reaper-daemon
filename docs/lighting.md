@@ -25,6 +25,10 @@ inventory = load_rig('config/lighting/lighting_rig.json')   # raises ValueError
 errors = validate_rig(data)                                  # [] when valid
 ```
 
+`tests/fixtures/lighting/dmxis_rig.json` is a real rig translated from the dmXis
+channel map next to it (`dmxis_channel_map.csv`). A test checks every CSV row
+against the JSON, so keep the two in step when either changes.
+
 Keep the file generic. Do not put serial numbers, USB identifiers, local paths,
 network addresses or credentials in it. Unknown keys are rejected, so a typo
 cannot slip through quietly. Keys that start with `_` are comments and are ignored.
@@ -49,7 +53,7 @@ Each fixture has:
 | --- | --- |
 | `id` | Stable identifier, lowercase `a-z0-9_`, starting with a letter. Unique. |
 | `name` | Display name. |
-| `type` | `par`, `wash`, `bar`, `spot`, `moving_head`, `blinder`, `strobe`, `hazer`. |
+| `type` | `par`, `wash`, `bar`, `spot`, `moving_head`, `effect`, `blinder`, `strobe`, `hazer`. |
 | `role` | `front_wash`, `back_wash`, `side_wash`, `key`, `spot`, `audience`, `effect`, `ambient`, `atmosphere`. |
 | `position` | `stage_left`, `stage_right`, `center`, `upstage`, `downstage`, `floor`, `truss`, `drum_riser`. |
 | `address` | First DMX channel, `1..universe_size`. |
@@ -57,13 +61,17 @@ Each fixture has:
 | `enabled` | Optional, default `true`. Disabled fixtures keep their channels reserved but get no role. |
 | `max_intensity` | Optional. May lower the rig ceiling, never raise it. |
 | `strobe_allowed` | Optional, default `false`. Opt-in for this fixture's strobe or shutter channel. |
+| `profile` | Optional. The dmXis fixture file name, e.g. `Par.dmx`. A bare name, never a path. |
+| `confidence` | Optional, default `config`. `inferred` marks a fixture whose address or layout was worked out rather than read from the dmXis setup. |
+| `automation_tracks` | Optional. Maps an absolute DMX channel (as a string key) to the REAPER track whose automation drives it. The channel must be inside the fixture's footprint, and one track drives one fixture. |
 | `notes` | Optional free text. |
 
 Channel kinds: `dimmer`, `red`, `green`, `blue`, `white`, `amber`, `uv`,
 `color_wheel`, `gobo`, `pan`, `pan_fine`, `tilt`, `tilt_fine`, `speed`, `zoom`,
-`focus`, `strobe`, `shutter`, `macro`, `mode`, `fog`, `fan`, `control`. List every
-channel the fixture's DMX mode uses, including ones you never plan to drive, so the
-footprint matches the hardware.
+`motor_1`, `motor_2`, `focus`, `strobe`, `shutter`, `macro`, `mode`, `fog`, `fan`,
+`control`, `unknown`. List every channel the fixture's DMX mode uses, including ones
+you never plan to drive, so the footprint matches the hardware. Use `unknown` for a
+slot whose function you have not identified yet. It is the only kind that may repeat.
 
 ## What gets checked
 
@@ -89,8 +97,9 @@ opted in.
 
 For each fixture the inventory reports `address`, `end_address`, `footprint`, a
 `channel_map` from channel kind to absolute DMX channel, derived `capabilities`
-(`rgb` needs red, green and blue; `movement` needs pan and tilt; `atmosphere`
-needs fog), the effective `max_intensity`, `strobe_allowed`, and
+(`rgb` needs red, green and blue; `movement` needs pan and tilt, or `motor_1`;
+`atmosphere` needs fog), `unknown_channels`, `automation_tracks`, `profile`,
+`confidence`, the effective `max_intensity`, `strobe_allowed`, and
 `locked_channels`: the strobe or shutter channels a future controller must hold
 closed. The rig level adds `roles` (enabled fixture ids per role),
 `channels_used`, `free_ranges` for patching new fixtures, and a `caveat` that

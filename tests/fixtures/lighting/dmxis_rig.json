@@ -1,0 +1,86 @@
+{
+  "_comment": "Translation of dmxis_channel_map.csv. Footprints run to the highest known channel; slots with no known function are 'unknown'. Roles and positions for the pars are read from the strobe track names. max_intensity is a placeholder.",
+
+  "schema_version": 1,
+
+  "rig": {
+    "name": "DMXIS rig",
+    "controller": "dmxis",
+    "universe": 1,
+    "universe_size": 512
+  },
+
+  "safety": {
+    "strobe_enabled": false,
+    "atmosphere_enabled": false,
+    "max_intensity": 0.85
+  },
+
+  "fixtures": [
+    {
+      "id": "par_1",
+      "name": "Par11",
+      "type": "par",
+      "role": "front_wash",
+      "position": "stage_right",
+      "address": 1,
+      "channels": ["red", "green", "blue", "white", "strobe"],
+      "profile": "Par1.dmx",
+      "confidence": "config",
+      "automation_tracks": {"5": "strobo-prawy"}
+    },
+    {
+      "id": "par_2",
+      "name": "Par21",
+      "type": "par",
+      "role": "front_wash",
+      "position": "stage_left",
+      "address": 9,
+      "channels": ["red", "green", "blue", "white", "strobe"],
+      "profile": "Par2.dmx",
+      "confidence": "config",
+      "automation_tracks": {"9": "9", "13": "strobo-lewy"}
+    },
+    {
+      "id": "spider_1",
+      "name": "Spider 1",
+      "type": "effect",
+      "role": "effect",
+      "position": "stage_left",
+      "address": 17,
+      "channels": ["unknown", "unknown", "unknown", "unknown", "motor_1", "motor_2", "unknown",
+                   "unknown", "strobe", "unknown", "unknown", "unknown", "unknown", "unknown", "unknown"],
+      "profile": "Spider-lewy.dmx",
+      "confidence": "inferred",
+      "automation_tracks": {"21": "Pan1L", "22": "Pan1R", "25": "Move strobe left"},
+      "notes": "Start 17 inferred. Footprint assumed equal to Spider 2 (15 channels); the real mode may be longer."
+    },
+    {
+      "id": "spider_2",
+      "name": "Spider 2",
+      "type": "effect",
+      "role": "effect",
+      "position": "stage_right",
+      "address": 59,
+      "channels": ["unknown", "unknown", "unknown", "unknown", "motor_1", "motor_2", "unknown",
+                   "unknown", "strobe", "unknown", "unknown", "unknown", "unknown", "unknown", "unknown"],
+      "profile": "Spider-lewy.dmx",
+      "confidence": "inferred",
+      "automation_tracks": {"63": "Pan2R", "64": "Pan2L", "67": "Move strobe right", "73": "73"},
+      "notes": "Start 59 inferred. Channel 73 is labelled W.P2 in dmXis; its function is not confirmed."
+    },
+    {
+      "id": "par_3",
+      "name": "Par 3",
+      "type": "par",
+      "role": "back_wash",
+      "position": "upstage",
+      "address": 102,
+      "channels": ["red", "green", "blue", "white", "strobe"],
+      "profile": "Par1.dmx",
+      "confidence": "inferred",
+      "automation_tracks": {"106": "strobo-tył"},
+      "notes": "Start 102 and the Par1.dmx layout are inferred from the strobe on channel 106."
+    }
+  ]
+}
