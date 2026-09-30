@@ -34,6 +34,11 @@ The part-writing path is on both surfaces: `shred`/`band`/`humanize` on the CLI 
 to the `insert_riff`/`cut_band`/`humanize_take` MCP tools (`insert_groove` covers
 `groove`). One shared write path underneath, so behavior does not differ by surface.
 
+## Git remotes
+
+Push only to `Anthcode/reaper-daemon`. Never push, open pull requests, or send any
+changes to `wretcher207/reaper-daemon`, even if a task names that repository.
+
 ## Action boundary
 
 Public-facing Reaper Daemon content uses the canonical visual kit at
