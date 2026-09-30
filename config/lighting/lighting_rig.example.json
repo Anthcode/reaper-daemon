@@ -1,0 +1,82 @@
+{
+  "_comment": "Example rig for lighting_inventory.py. Fixtures are generic and fictional. Copy to lighting_rig.json next to this file and edit. Keys starting with _ are ignored; any other unknown key is an error. Nothing in this file is sent to a device.",
+
+  "schema_version": 1,
+
+  "rig": {
+    "name": "Example club rig",
+    "controller": "dmxis",
+    "universe": 1,
+    "universe_size": 512
+  },
+
+  "_safety": "strobe_enabled and atmosphere_enabled default to false. A fixture cannot raise max_intensity above the rig value.",
+  "safety": {
+    "strobe_enabled": false,
+    "atmosphere_enabled": false,
+    "max_intensity": 0.85
+  },
+
+  "fixtures": [
+    {
+      "id": "par_front_left",
+      "name": "Front PAR left",
+      "type": "par",
+      "role": "front_wash",
+      "position": "stage_left",
+      "address": 1,
+      "channels": ["dimmer", "red", "green", "blue", "strobe", "mode"]
+    },
+    {
+      "id": "par_front_right",
+      "name": "Front PAR right",
+      "type": "par",
+      "role": "front_wash",
+      "position": "stage_right",
+      "address": 7,
+      "channels": ["dimmer", "red", "green", "blue", "strobe", "mode"]
+    },
+    {
+      "id": "bar_back",
+      "name": "Back LED bar",
+      "type": "bar",
+      "role": "back_wash",
+      "position": "upstage",
+      "address": 13,
+      "channels": ["dimmer", "red", "green", "blue", "white"],
+      "max_intensity": 0.7
+    },
+    {
+      "id": "spot_center",
+      "name": "Centre moving head",
+      "type": "moving_head",
+      "role": "spot",
+      "position": "truss",
+      "address": 20,
+      "channels": ["pan", "pan_fine", "tilt", "tilt_fine", "speed", "dimmer", "shutter", "color_wheel", "gobo", "control"],
+      "notes": "Pan and tilt are declared only; no movement limits are defined yet."
+    },
+    {
+      "id": "strobe_main",
+      "name": "Main strobe",
+      "type": "strobe",
+      "role": "effect",
+      "position": "center",
+      "address": 40,
+      "channels": ["dimmer", "strobe"],
+      "enabled": false,
+      "strobe_allowed": false,
+      "notes": "Disabled by default. Needs safety.strobe_enabled and an explicit strobe_allowed before use."
+    },
+    {
+      "id": "hazer",
+      "name": "Hazer",
+      "type": "hazer",
+      "role": "atmosphere",
+      "position": "floor",
+      "address": 50,
+      "channels": ["fog", "fan"],
+      "enabled": false
+    }
+  ]
+}
