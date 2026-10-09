@@ -37,7 +37,7 @@ to the `insert_riff`/`cut_band`/`humanize_take` MCP tools (`insert_groove` cover
 ## Action boundary
 
 Public-facing Reaper Daemon content uses the canonical visual kit at
-`C:/media/reaper-daemon-visuals/`. Read its `AGENTS.md`, `extracted/IDENTITY.md`,
+`C:/media/video/reaper-daemon-animated/working/reaper-daemon-visuals/`. Read its `AGENTS.md`, `extracted/IDENTITY.md`,
 and `WHERE-IT-GOES.md` before creating or changing visual content. All visual
 edits and new variants originate in that folder. Repository/site assets are
 delivery copies; follow the kit's synchronized update process so affected
@@ -73,6 +73,6 @@ CLI verify exit code 2 means the mutation may already have happened but verifica
 failed. Do not retry blindly. Report it as unverified and explain that one REAPER undo
 reverts the attempted change.
 
-Current status and release facts belong in `HANDOFF.md`. Public documentation and UI copy require the appropriate voice-profile pass from the shared working agreement; live music operations do not require a writing workflow.
+Current status and release facts belong in `HANDOFF.md`. Public documentation and UI copy go through the appropriate voice profile; live music operations do not require a writing workflow.
 
 If REAPER is closed and it needs to be open for testing or anything related to the work in this project; open it. 
