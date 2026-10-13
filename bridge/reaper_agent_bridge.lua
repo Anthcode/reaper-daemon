@@ -4571,6 +4571,7 @@ handlers.new_project_tab = function(command)
   end
   return { new_tab = true, tab = tab, tabs = i, track_count = 0 }
 end
+for _, name in ipairs({"link_fx_midi_cc", "get_midi_inputs", "configure_midi_input", "insert_midi_events", "save_project_as", "get_fx_preset", "set_fx_preset"}) do handlers[name] = fx_chain.performance[name] end
 handlers.capture_track_audio = command_capture_track_audio
 handlers.get_track_routing = command_get_track_routing
 

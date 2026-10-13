@@ -2121,4 +2121,11 @@ end)()
   for k in pairs(reaper) do reaper[k]=old[k] end
 end)()
 
+;(function()
+  for _,name in ipairs({'link_fx_midi_cc','get_midi_inputs','configure_midi_input','insert_midi_events',
+      'save_project_as','get_fx_preset','set_fx_preset','new_project_tab','insert_track_template'}) do
+    eq(type(B.handlers[name]),'function',name..' is a registered command')
+  end
+end)()
+
 print(("test_bridge: OK (%d checks)"):format(checks))
