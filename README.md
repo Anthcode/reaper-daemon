@@ -24,6 +24,11 @@ reverts anything an agent does.
 
 ## Install
 
+Reaper Daemon has two halves, a Lua bridge that runs inside REAPER and the
+tools that talk to it. Both come from a clone of this repository on the
+computer REAPER runs on, so install here first, even if you found it through
+the Claude plugin directory.
+
 ```bash
 git clone https://github.com/wretcher207/reaper-daemon.git
 cd reaper-daemon
@@ -36,14 +41,26 @@ Restart REAPER, then check the bridge is alive:
 python3 reaperd.py status
 ```
 
+Rendering and audio capture are off until you allow them, and every
+measurement needs them, including `verify_change`. To do that, run:
+
+```bash
+python3 setup/install.py --allow-audio-writes
+```
+
+Saving the project and changing REAPER preferences have their own switches;
+see [docs/install.md](docs/install.md).
+
 Prefer ReaPack, or want to load the bridge by hand? See [docs/install.md](docs/install.md).
 
 ### Claude plugin
 
-The repository is also a Claude plugin. It bundles the MCP server with four
-skills: drum programming, drum humanizing, guitar and bass parts, and MIDI
-for an existing arrangement. The plugin drives the install above, so clone
-and run the installer first.
+The repository is also a Claude plugin. It bundles the MCP server with five
+skills: setup, drum programming, drum humanizing, guitar and bass parts, and
+MIDI for an existing arrangement. The plugin drives the install above, so if
+you added it before installing, ask Claude to set up Reaper Daemon. The setup
+skill finds what's missing, runs the clone and installer with you, asks which
+disk writes to allow, and checks that REAPER answers.
 
 When you add the plugin, Claude asks for two settings:
 
@@ -132,6 +149,8 @@ Claude Code session that always knows which track you have selected.
 | [Verify](docs/verify.md) | closed-loop mix moves with measured proof |
 | [Protocol](docs/protocol.md) | the file wire format |
 | [Troubleshooting](docs/troubleshooting.md) | silent captures, stale heartbeats |
+| [Watchdog](docs/watchdog.md) | unattended runs: relaunch REAPER, dialogs, stale queue files |
+| [Song planner](docs/song-planner.md) | instrument library, song sheets, approved drafts |
 | [Security](docs/security.md) | trust model and the optional token |
 | [Develop](docs/develop.md) | tests, CI, repo layout |
 
@@ -139,7 +158,8 @@ Agents should read [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and
 [bridge/command_schema.md](bridge/command_schema.md). Two bundled skills,
 [arrangement-midi](skills/arrangement-midi/SKILL.md) and
 [drum-humanize](skills/drum-humanize/SKILL.md), cover MIDI composition and
-drum humanization.
+drum humanization. [song-planner](skills/song-planner/SKILL.md) plans and
+drafts whole songs from a brief, a riff or a reference.
 
 ## Security
 

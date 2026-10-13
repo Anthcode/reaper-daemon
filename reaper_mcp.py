@@ -235,9 +235,49 @@ def _forward(cmd_type, args, keys, timeout_ms=DEFAULT_TIMEOUT_MS,
                                else False))
 
 
+# The bridge Lua is what setup/install.py points REAPER at, so its presence is
+# what separates a cloned, installable folder from a wrong or missing one.
+_BRIDGE_SCRIPT = os.path.join("bridge", "reaper_agent_bridge.lua")
+
+
+def _install_problem():
+    """(code, fix) when BRIDGE_ROOT is not a Reaper Daemon clone, else None.
+
+    Checked before anything touches the folder: sending a command creates
+    inbox/ under BRIDGE_ROOT, and a stray inbox/ in the default ~/reaper-daemon
+    makes the README's git clone into that same folder fail."""
+    readme = os.path.join(SERVER_DIR, "README.md")
+    if not os.path.isdir(BRIDGE_ROOT):
+        return ("NOT_INSTALLED",
+                f"Reaper Daemon isn't installed at {BRIDGE_ROOT}. The plugin "
+                "only carries the MCP server; REAPER needs the bridge from a "
+                "clone of the reaper-daemon repository. Clone it into that "
+                "folder, run setup/install.py from the clone, and restart "
+                "REAPER (Install section of " + readme + "). If you cloned it "
+                "somewhere else, set the plugin's Reaper Daemon folder to that "
+                "path.")
+    if not os.path.isfile(os.path.join(BRIDGE_ROOT, _BRIDGE_SCRIPT)):
+        return ("WRONG_FOLDER",
+                f"{BRIDGE_ROOT} exists but isn't a Reaper Daemon clone (no "
+                f"{_BRIDGE_SCRIPT}). Set the plugin's Reaper Daemon folder to "
+                "the folder you cloned and ran setup/install.py from, or clone "
+                "it there (Install section of " + readme + ").")
+    return None
+
+
+def _not_installed_result(problem):
+    code, fix = problem
+    return _error_result(code, fix + " Nothing was sent to REAPER.")
+
+
 def tool_get_status(args):
+    problem = _install_problem()
+    if problem:
+        info = {"alive": False, "installed": False, "bridge_root": BRIDGE_ROOT,
+                "problem": problem[0], "fix": problem[1]}
+        return _text(json.dumps(info, indent=1), is_error=True)
     alive = reaperd.status_ok(bridge_root=BRIDGE_ROOT, quiet=True)
-    info = {"alive": bool(alive), "bridge_root": BRIDGE_ROOT}
+    info = {"alive": bool(alive), "installed": True, "bridge_root": BRIDGE_ROOT}
     hb_path = os.path.join(BRIDGE_ROOT, "bridge", "heartbeat.json")
     try:
         with open(hb_path, "r", encoding="utf-8") as f:
@@ -266,8 +306,20 @@ def tool_get_status(args):
         info["allow_risk_level_3"] = None
         info["gates"] = None
     if not alive:
-        info["fix"] = ("Start REAPER (the bridge auto-loads via __startup.lua), "
-                       "or run the bridge action manually. See README.")
+        if info["heartbeat"] is None:
+            # Cloned but the bridge has never written a heartbeat: either the
+            # installer never ran or REAPER hasn't restarted since it did.
+            running = reaperd.reaper_running()
+            info["problem"] = "BRIDGE_NEVER_LOADED"
+            info["fix"] = (
+                "The bridge has never run from this folder. Run "
+                f"setup/install.py in {BRIDGE_ROOT}, then "
+                + ("restart REAPER." if running else "start REAPER."))
+        else:
+            info["problem"] = "BRIDGE_NOT_RESPONDING"
+            info["fix"] = ("Start REAPER (the bridge auto-loads via "
+                           "__startup.lua), or run the bridge action manually. "
+                           "See README.")
     return _text(json.dumps(info, indent=1), is_error=not alive)
 
 
@@ -1963,28 +2015,41 @@ for _name, _description, _props, _required, _track, _fx, _mutates in [
      ("Create a new MIDI item on one track from a list of raw events (notes, CC, pitch bend, "
       "program change), with no humanizing. Use this for exact, hand-specified MIDI; use "
       "insert_midi_file when a .mid already exists, insert_groove for humanized drums, "
-      "insert_riff for humanized guitar or bass, cut_band for a whole four-track jam. Event "
-      "times are seconds from the item start. For drums, keep the golden rule yourself: no drum "
-      "hits the same velocity twice in a row. Returns {track_guid, notes, controls, "
-      "start_seconds, length_seconds}. Errors: BAD_PAYLOAD (an event is out of range; nothing "
-      "is written), INSERT_FAILED / VERIFY_FAILED (the new item is deleted again). Undoable."),
-     {"start_seconds": {"type": "number", "minimum": 0,
-                        "description": "Project time in seconds where the new item starts."},
+      "insert_riff for humanized guitar or bass, cut_band for a whole four-track jam. Two "
+      "timing units. Default time_unit \"seconds\": start_seconds + length_seconds, event time "
+      "and duration in seconds from the item start. time_unit \"beats\" (use this to write "
+      "music): start_bar (1-based) or start_beats (project quarter notes), length_beats, and "
+      "event time and duration in quarter notes from the item start, so notes follow the tempo "
+      "map. Mixing units is refused. For drums, keep the golden rule yourself: no drum hits the "
+      "same velocity twice in a row. Returns {track_guid, notes, controls, time_unit, "
+      "start_seconds, length_seconds} plus start_bar/start_beats/length_beats in beats mode. "
+      "Errors: BAD_PAYLOAD (an event or the timing is out of range; nothing is written), "
+      "INSERT_FAILED / VERIFY_FAILED (the new item is deleted again). Undoable."),
+     {"time_unit": {"type": "string", "enum": ["seconds", "beats"],
+                    "description": "Default seconds. beats = quarter notes, tempo-map aware."},
+      "start_seconds": {"type": "number", "minimum": 0,
+                        "description": "seconds mode: project time where the new item starts."},
       "length_seconds": {"type": "number", "minimum": 0.001, "maximum": 86400,
-                         "description": "Item length in seconds; every event must fit inside it."},
+                         "description": "seconds mode: item length; every event must fit inside it."},
+      "start_bar": {"type": "integer", "minimum": 1,
+                    "description": "beats mode: 1-based bar the item starts on (or use start_beats)."},
+      "start_beats": {"type": "number", "minimum": 0,
+                      "description": "beats mode: project quarter-note position the item starts on."},
+      "length_beats": {"type": "number", "exclusiveMinimum": 0,
+                       "description": "beats mode: item length in quarter notes (4 = one 4/4 bar)."},
       "events": {"type": "array", "minItems": 1, "maxItems": 10000,
                  "description": "1..10000 events. Each needs type and time; the other fields depend on type.",
                  "items": {"type": "object", "required": ["type", "time"], "properties": {
                      "type": {"type": "string", "enum": ["note", "cc", "pitch_bend", "program_change"]},
-                     "time": {"type": "number", "minimum": 0, "description": "Seconds from item start."},
+                     "time": {"type": "number", "minimum": 0, "description": "From item start, in the payload's time_unit."},
                      "channel": {"type": "integer", "minimum": 0, "maximum": 15, "description": "0-based MIDI channel, default 0."},
                      "pitch": {"type": "integer", "minimum": 0, "maximum": 127, "description": "note only: MIDI note number (60 = middle C)."},
                      "velocity": {"type": "integer", "minimum": 1, "maximum": 127, "description": "note only."},
-                     "duration": {"type": "number", "description": "note only: seconds; must end inside the item."},
+                     "duration": {"type": "number", "description": "note only: in the payload's time_unit; must end inside the item."},
                      "controller": {"type": "integer", "minimum": 0, "maximum": 127, "description": "cc only: controller number."},
                      "value": {"type": "integer", "minimum": 0, "maximum": 16383,
                                "description": "cc and program_change: 0..127. pitch_bend: 0..16383, 8192 = centre."}}}}},
-     ["start_seconds", "length_seconds", "events"], True, False, True),
+     ["events"], True, False, True),
     ("save_project_as", "Save to a NEW absolute .rpp path, or export explicitly named tracks as a media-free .RTrackTemplate. Existing files are refused. Requires project save gate.",
      {"path": {"type": "string"}, "template": {"type": "boolean"}, "track_guids": {"type": "array", "items": {"type": "string"}}}, ["path"], True, True, True),
     ("get_fx_preset",
@@ -2036,6 +2101,163 @@ def tool_insert_performance_audition(args):
 TOOLS.append({"name": "insert_performance_audition", "description": "Insert a repeatable 15-second melodic test of expression, modulation, sustain and octave range. Use a separate audition project. Render with capture_track_audio and audition; MIDI success does not prove controller response.",
               "inputSchema": _schema({"target_track_guid": {"type": "string"}, "start_seconds": {"type": "number"}, "pitch": {"type": "integer"}, **DRY_RUN_PROP}, ["target_track_guid"]),
               "handler": tool_insert_performance_audition})
+
+
+def _instrument_sender(kind, payload, **_):
+    return _send(kind, payload, timeout_ms=30000)
+
+
+def tool_instruments(args):
+    """Named instrument library: list/show (read-only), save, load, remove."""
+    import instruments as inst
+    action = args.get("action")
+    try:
+        if action == "list":
+            rows = inst.find(inst.load_library(BRIDGE_ROOT), role=args.get("role"),
+                             tag=args.get("tag"))
+            return _text(json.dumps(rows, indent=1))
+        if action == "show":
+            lib = inst.load_library(BRIDGE_ROOT)
+            if args.get("name") not in lib:
+                return _text(f"no instrument named {args.get('name')!r}", is_error=True)
+            return _text(json.dumps(lib[args["name"]], indent=1))
+        if action == "remove":
+            inst.remove(BRIDGE_ROOT, args.get("name"))
+            return _text(json.dumps({"ok": True, "removed": args.get("name")}))
+        if action not in ("save", "save_rig", "load"):
+            return _text(f"unknown instruments action: {action!r}", is_error=True)
+        entry0 = inst.load_library(BRIDGE_ROOT).get(args.get("name") or "", {})
+        needed = ("name",) if action == "load" and entry0.get("rig") else ("name", "track")
+        for key in needed:
+            if not args.get(key):
+                return _text(f"instruments {action} needs '{key}'", is_error=True)
+        if not reaperd.status_ok(bridge_root=BRIDGE_ROOT, quiet=True):
+            return _reaper_down_result("instruments")
+        if action == "save_rig":
+            if not args.get("role"):
+                return _text("instruments save_rig needs 'role'", is_error=True)
+            entry, names = inst.save_rig(
+                BRIDGE_ROOT, _instrument_sender, args["name"], args["track"], args["role"],
+                library=args.get("library"), maps=args.get("maps"), tags=args.get("tags"),
+                notes=args.get("notes"), overwrite=bool(args.get("overwrite")))
+            return _text(json.dumps({"ok": True, "saved_rig": args["name"],
+                                     "tracks": names}, indent=1))
+        if action == "load" and entry0.get("rig"):
+            entry, added, play = inst.load_rig(BRIDGE_ROOT, _instrument_sender, args["name"])
+            return _text(json.dumps({"ok": True, "loaded_rig": args["name"], "added": added,
+                                     "play_track_guid": play, "maps": entry.get("maps")},
+                                    indent=1))
+        if action == "save":
+            if not args.get("role"):
+                return _text("instruments save needs 'role'", is_error=True)
+            entry, data = inst.save_from_track(
+                BRIDGE_ROOT, _instrument_sender, args["name"], args["track"], args["role"],
+                library=args.get("library"), maps=args.get("maps"), range_=args.get("range"),
+                articulations=args.get("articulations"), tags=args.get("tags"),
+                notes=args.get("notes"), overwrite=bool(args.get("overwrite")))
+            return _text(json.dumps({"ok": True, "saved": dict(entry, name=args["name"]),
+                                     "chain": data.get("chain")}, indent=1))
+        entry, data = inst.load_onto_track(BRIDGE_ROOT, _instrument_sender, args["name"],
+                                           args["track"],
+                                           allow_existing_fx=bool(args.get("allow_existing_fx")))
+        return _text(json.dumps({"ok": True, "loaded": args["name"], "track": args["track"],
+                                 "fx": data.get("fx"), "maps": entry.get("maps")}, indent=1))
+    except (inst.InstrumentError, ValueError) as exc:
+        return _text(str(exc), is_error=True)
+
+
+TOOLS.append({
+    "name": "instruments",
+    "description": (
+        "Named instrument library, so a sound is picked by name instead of by plugin index. "
+        "list/show: read-only; each entry has role, library, note maps (guitar/bass/drums map "
+        "names the generators use), playable range, tags, and the saved chain name or none. "
+        "save: the user has loaded a sound by hand on 'track' (any Kontakt library or Serum "
+        "preset); this saves that track's FX chain, plugin state included, as "
+        "FXChains/instrument-<name> and registers it. load: splice a saved instrument onto an "
+        "EMPTY track (refused if the track has FX unless allow_existing_fx) and verify the FX "
+        "landed; use the entry's maps when writing notes. remove: drop a user entry (shipped "
+        "catalog entries stay). save_rig: for a multi-output instrument (a Kontakt kit "
+        "feeding Kick/Snare/room tracks), save the instrument track plus every track its "
+        "sends and folders reach as a track template; load of a rig adds all those tracks "
+        "and returns play_track_guid, where the MIDI goes. Errors name the problem; "
+        "nothing is half-registered."),
+    "inputSchema": _schema({
+        "action": {"type": "string", "enum": ["list", "show", "save", "save_rig", "load",
+                                              "remove"]},
+        "name": {"type": "string", "description": "lowercase name, e.g. dark-pad"},
+        "track": {"type": "string", "description": "exact track name (save: source, load: destination)"},
+        "role": {"type": "string", "enum": ["guitar", "bass", "drums", "synth", "keys",
+                                            "orchestral", "vocal", "other"]},
+        "tag": {"type": "string", "description": "list: filter by one tag"},
+        "library": {"type": "string", "description": "save: what the sound is, e.g. 'Serum 2: PD - Dark Matter'"},
+        "maps": {"type": "object", "description": "save: {guitar|bass|drums: map name}"},
+        "range": {"type": "array", "items": {"type": "integer"}, "description": "save: [low, high] MIDI notes"},
+        "articulations": {"type": "object", "description": "save: {articulation: keyswitch MIDI note}"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "string"},
+        "overwrite": {"type": "boolean", "description": "save: replace an existing saved chain"},
+        "allow_existing_fx": {"type": "boolean", "description": "load: append to a track that has FX"},
+    }, required=["action"]),
+    "handler": tool_instruments,
+})
+
+
+def tool_song_plan(args):
+    """Song planner over one sheet file: check/show (read-only), approve, draft."""
+    import songplan as sp
+    action, path = args.get("action"), args.get("sheet")
+    if not path or not isinstance(path, str):
+        return _text("song_plan needs 'sheet' (path to the sheet JSON)", is_error=True)
+    path = os.path.abspath(os.path.expanduser(path))
+    try:
+        sheet = sp.load(path)
+        if action == "show":
+            return _text(sp.render_text(sheet))
+        problems = sp.check(sheet, BRIDGE_ROOT)
+        if action == "check" or problems:
+            return _text(json.dumps({"ok": not problems, "problems": problems,
+                                     "approved": sp.is_approved(sheet)}, indent=1),
+                         is_error=bool(problems))
+        if action == "approve":
+            sp.save(path, sp.approve(sheet))
+            return _text(json.dumps({"ok": True, "approved": path}))
+        if action != "draft":
+            return _text(f"unknown song_plan action: {action!r}", is_error=True)
+        if not sp.is_approved(sheet):
+            return _text(json.dumps({"ok": False, "problems": [
+                "the sheet is not approved (or changed after approval); show it, get a "
+                "yes, then approve it"]}, indent=1), is_error=True)
+        if not reaperd.status_ok(bridge_root=BRIDGE_ROOT, quiet=True):
+            return _reaper_down_result("song_plan")
+        report = sp.draft(sheet, BRIDGE_ROOT, _instrument_sender,
+                          seed=int(args.get("seed") or 101))
+        return _text(json.dumps(report, indent=1), is_error=not report["ok"])
+    except sp.SheetError as exc:
+        return _text(json.dumps({"ok": False, "problems": exc.problems}, indent=1),
+                     is_error=True)
+    except (OSError, ValueError) as exc:
+        return _text(str(exc), is_error=True)
+
+
+TOOLS.append({
+    "name": "song_plan",
+    "description": (
+        "Song planner. A sheet JSON (see docs/song-planner.md and skills/song-planner) "
+        "holds title, tempo, key, parts (instrument-library names) and sections with bars, "
+        "energy, drum lanes, 16-cell riff bars and layer notes. check: every problem at once. "
+        "show: the readable sheet to put in front of the person. approve: ONLY after the "
+        "person explicitly said yes to the whole sheet; any later edit cancels it. draft: "
+        "refuses an unapproved sheet, then opens a NEW project tab and writes tempo, tracks, "
+        "saved sounds, a region per section, drums, both guitars, bass and layers, each step "
+        "reported separately. 4/4 and one tempo per song only. Never saves the project."),
+    "inputSchema": _schema({
+        "action": {"type": "string", "enum": ["check", "show", "approve", "draft"]},
+        "sheet": {"type": "string", "description": "path to the sheet JSON"},
+        "seed": {"type": "integer", "description": "draft: humanizing seed"},
+    }, required=["action", "sheet"]),
+    "handler": tool_song_plan,
+})
 
 def tool_transcribe_drums(args):
     import drum_transcription as transcription
@@ -2110,6 +2332,11 @@ TOOLS.append({
 
 _TOOL_BY_NAME = {t["name"]: t for t in TOOLS}
 
+# Tools that never read or write the bridge folder, so they work before the
+# clone exists. get_status reports the install problem itself.
+_NO_BRIDGE_TOOLS = {"get_status", "drum_workshop", "instrument_inventory",
+                    "complete_postmortem_onboarding"}
+
 
 # ---------------------------------------------------------------------------
 # JSON-RPC over stdio
@@ -2156,6 +2383,10 @@ def handle_message(msg):
         if tool is None:
             return _rpc_error(mid, -32602, f"unknown tool: {params.get('name')!r}")
         args = params.get("arguments") or {}
+        if tool["name"] not in _NO_BRIDGE_TOOLS:
+            problem = _install_problem()
+            if problem:
+                return _rpc_result(mid, _not_installed_result(problem))
         try:
             return _rpc_result(mid, tool["handler"](args))
         except Exception as e:  # tool bug -> tool-level error, keep serving

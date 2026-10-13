@@ -10,7 +10,7 @@ These bridge commands work through `python reaperd.py cmd COMMAND JSON` and the 
 | --- | --- | --- |
 | `get_midi_inputs` | None | Available named inputs; indices above 63 are reported but this input setter doesn't support them |
 | `configure_midi_input` | `device` (63 all, 62 virtual keyboard), `channel` (0 all, 1..16), optional boolean `arm`, `monitor` | Input, arm and monitor readback |
-| `insert_midi_events` | `start_seconds`, `length_seconds`, `events` | New item; verified note and control counts |
+| `insert_midi_events` | `start_seconds`, `length_seconds`, `events`; or `time_unit: "beats"` with `start_bar` or `start_beats`, `length_beats`, `events` | New item; verified note and control counts, actual item position |
 | `link_fx_midi_cc` | FX selector, scanned `param_index`, `controller`, optional `channel` (1..16), `scale`, `offset` (-1..1) | Verified native MIDI parameter link; bus 0 |
 | `get_fx_preset` | FX selector | Current host preset name, index and count |
 | `set_fx_preset` | FX selector, exact `name` | Loaded host preset name, verified by readback |
@@ -22,7 +22,14 @@ Track selectors use `target_track_guid` or `target_track_name` on the bridge. MC
 
 ## MIDI events
 
-Event `time` and note `duration` are seconds relative to the item start. Channels are 0..15 for events, unlike the input selector. Supported event objects:
+Event `time` and note `duration` are relative to the item start, in the payload's unit. The default unit is seconds (`start_seconds`, `length_seconds`). To write music on the grid, send `time_unit: "beats"` with `start_bar` (1-based) or `start_beats` (project quarter notes) and `length_beats`; event times and durations are then quarter notes, so the notes follow the tempo map. A payload that mixes the two units is refused.
+
+```json
+{"target_track_name":"Lead","time_unit":"beats","start_bar":9,"length_beats":8,
+ "events":[{"type":"note","time":1.5,"duration":0.5,"pitch":43,"velocity":87}]}
+```
+
+The reply always reports `start_seconds` and `length_seconds` as REAPER placed the item; beats mode adds `start_bar`, `start_beats` and `length_beats`. Channels are 0..15 for events, unlike the input selector. Supported event objects:
 
 ```json
 [

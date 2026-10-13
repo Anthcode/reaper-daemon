@@ -132,6 +132,45 @@ return function(B, ok, eq)
   eq(target.items[1].B_LOOPSRC,0,"transcription item does not loop")
   eq(pcall(B.handlers.insert_drum_transcription,{payload=payload()}),false,"duplicate job refused by native marker")
   eq(#target.items,1,"duplicate retry adds no notes")
+  local markers={}
+  reaper.GetMediaItemInfo_Value=function(it,k) return ({D_POSITION=it.position,D_LENGTH=it.length,C_LOCK=state.locked or 0})[k] end
+  reaper.GetMediaItemTakeInfo_Value=function(t,k) return ({D_PLAYRATE=t.rate,D_PITCH=t.pitch,D_STARTOFFS=t.offset,B_PPITCH=1})[k] end
+  reaper.GetTakeNumStretchMarkers=function() return #markers end
+  reaper.GetTakeStretchMarker=function(_,i)
+    local m=markers[i+1]; return i,m.position+(state.corrupt_marker and .1 or 0),m.source_position
+  end
+  reaper.GetTakeStretchMarkerSlope=function() return 0 end
+  reaper.GetGlobalAutomationOverride=function() return -1 end
+  reaper.UpdateItemInProject=function() end
+  reaper.SetTakeStretchMarker=function(_,_,pos,src)
+    if state.fail_marker and #markers==1 then return -1 end
+    markers[#markers+1]={position=pos,source_position=src}; return #markers-1
+  end
+  reaper.DeleteTakeStretchMarkers=function() markers={} end
+  local timing={edits={{source=snapshot,markers={
+    {position=0,source_position=.8},{position=1.01,source_position=1.8},{position=4,source_position=4.8}}}}}
+  timing.validate_only=true
+  ok(B.handlers.apply_audio_timing({payload=timing}).validated,"timing validates nonzero source offset")
+  eq(#markers,0,"timing validation writes nothing")
+  timing.validate_only=nil; item.position=13
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"timing refuses stale source")
+  item.position=12.5; state.locked=1
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"timing preserves locked items")
+  state.locked=0; state.playing=1
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"timing refuses playback")
+  state.playing=0; timing.edits[1].markers[2].position=1.1
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"timing refuses excessive correction")
+  timing.edits[1].markers[2].position=1.01; state.fail_marker=true
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"failed timing insertion reports failure")
+  eq(#markers,0,"failed timing insertion removes its own markers")
+  state.fail_marker=false; state.corrupt_marker=true
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"timing verifies native marker values")
+  eq(#markers,0,"timing readback failure rolls back")
+  state.corrupt_marker=false
+  ok(B.handlers.apply_audio_timing({payload=timing}).verified,"timing write verified")
+  eq(#markers,3,"timing inserts exact marker count")
+  eq(pcall(B.handlers.apply_audio_timing,{payload=timing}),false,"timing refuses retry over existing markers")
+  eq(#B.handlers.get_audio_timing({payload={item_guid='item'}}).stretch_markers,3,"timing read returns all markers")
   for k in pairs(reaper) do reaper[k]=nil end
   for k,v in pairs(saved) do reaper[k]=v end
 end

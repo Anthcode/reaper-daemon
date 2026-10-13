@@ -18,10 +18,10 @@ the zero-dependency `reaperd.py` CLI.
   require the user to dictate the rhythm. Scoped corrections aren't global bans.
 - `skills/guitar-apparatus/`: riff notation, tuning/keyswitch maps, and the performance
   engine behind `shred` and `band`. Read it before writing or editing a riff file.
-- `docs/CONSOLE.md`: the Daemon Console (in-REAPER panel + `console_sidecar.py`) —
+- `docs/CONSOLE.md`: the Daemon Console (in-REAPER panel + `console_sidecar.py`):
   architecture, file protocol, money/liveness rules. Read it only when the task
   touches the console; its session rules live in `docs/console_contract.md`.
-- Writing drum velocities — by any path, including a one-off script — means
+- Writing drum velocities (by any path, including a one-off script) means
   `skills/drum-apparatus/drumgen/goldenrule.py`. No drum ever hits the same velocity
   twice in a row, per drum in time order, whatever lands in between. `enforce()` to
   apply it, `violations()` to prove it before the write.
@@ -41,14 +41,7 @@ changes to `wretcher207/reaper-daemon`, even if a task names that repository.
 
 ## Action boundary
 
-Public-facing Reaper Daemon content uses the canonical visual kit at
-`C:/media/reaper-daemon-visuals/`. Read its `AGENTS.md`, `extracted/IDENTITY.md`,
-and `WHERE-IT-GOES.md` before creating or changing visual content. All visual
-edits and new variants originate in that folder. Repository/site assets are
-delivery copies; follow the kit's synchronized update process so affected
-formats and the current package stay consistent. Do not invent a separate
-identity for a README, website, social post, thumbnail, or video.
-
+- If REAPER is closed and the work needs it open (testing or anything else in this project), open it.
 - For a request to inspect, explain, diagnose, or review, use read-only discovery and
   report the result. Do not mutate the REAPER project.
 - For a request to change the live project, check bridge status, inspect context, make
@@ -78,6 +71,14 @@ CLI verify exit code 2 means the mutation may already have happened but verifica
 failed. Do not retry blindly. Report it as unverified and explain that one REAPER undo
 reverts the attempted change.
 
-Current status and release facts belong in `HANDOFF.md`. Public documentation and UI copy require the appropriate voice-profile pass from the shared working agreement; live music operations do not require a writing workflow.
+## Public content and visuals
 
-If REAPER is closed and it needs to be open for testing or anything related to the work in this project; open it. 
+Public-facing Reaper Daemon content uses the canonical visual kit at
+`C:/media/video/reaper-daemon-animated/working/reaper-daemon-visuals/`. Read its `AGENTS.md`, `extracted/IDENTITY.md`,
+and `WHERE-IT-GOES.md` before creating or changing visual content. All visual
+edits and new variants originate in that folder. Repository/site assets are
+delivery copies; follow the kit's synchronized update process so affected
+formats and the current package stay consistent. Do not invent a separate
+identity for a README, website, social post, thumbnail, or video.
+
+Current status and release facts belong in `HANDOFF.md`. Tests, CI and repo layout: `docs/develop.md`.
