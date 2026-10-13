@@ -2124,13 +2124,29 @@ def tool_instruments(args):
         if action == "remove":
             inst.remove(BRIDGE_ROOT, args.get("name"))
             return _text(json.dumps({"ok": True, "removed": args.get("name")}))
-        if action not in ("save", "load"):
+        if action not in ("save", "save_rig", "load"):
             return _text(f"unknown instruments action: {action!r}", is_error=True)
-        for key in ("name", "track"):
+        entry0 = inst.load_library(BRIDGE_ROOT).get(args.get("name") or "", {})
+        needed = ("name",) if action == "load" and entry0.get("rig") else ("name", "track")
+        for key in needed:
             if not args.get(key):
                 return _text(f"instruments {action} needs '{key}'", is_error=True)
         if not reaperd.status_ok(bridge_root=BRIDGE_ROOT, quiet=True):
             return _reaper_down_result("instruments")
+        if action == "save_rig":
+            if not args.get("role"):
+                return _text("instruments save_rig needs 'role'", is_error=True)
+            entry, names = inst.save_rig(
+                BRIDGE_ROOT, _instrument_sender, args["name"], args["track"], args["role"],
+                library=args.get("library"), maps=args.get("maps"), tags=args.get("tags"),
+                notes=args.get("notes"), overwrite=bool(args.get("overwrite")))
+            return _text(json.dumps({"ok": True, "saved_rig": args["name"],
+                                     "tracks": names}, indent=1))
+        if action == "load" and entry0.get("rig"):
+            entry, added, play = inst.load_rig(BRIDGE_ROOT, _instrument_sender, args["name"])
+            return _text(json.dumps({"ok": True, "loaded_rig": args["name"], "added": added,
+                                     "play_track_guid": play, "maps": entry.get("maps")},
+                                    indent=1))
         if action == "save":
             if not args.get("role"):
                 return _text("instruments save needs 'role'", is_error=True)
@@ -2161,9 +2177,14 @@ TOOLS.append({
         "FXChains/instrument-<name> and registers it. load: splice a saved instrument onto an "
         "EMPTY track (refused if the track has FX unless allow_existing_fx) and verify the FX "
         "landed; use the entry's maps when writing notes. remove: drop a user entry (shipped "
-        "catalog entries stay). Errors name the problem; nothing is half-registered."),
+        "catalog entries stay). save_rig: for a multi-output instrument (a Kontakt kit "
+        "feeding Kick/Snare/room tracks), save the instrument track plus every track its "
+        "sends and folders reach as a track template; load of a rig adds all those tracks "
+        "and returns play_track_guid, where the MIDI goes. Errors name the problem; "
+        "nothing is half-registered."),
     "inputSchema": _schema({
-        "action": {"type": "string", "enum": ["list", "show", "save", "load", "remove"]},
+        "action": {"type": "string", "enum": ["list", "show", "save", "save_rig", "load",
+                                              "remove"]},
         "name": {"type": "string", "description": "lowercase name, e.g. dark-pad"},
         "track": {"type": "string", "description": "exact track name (save: source, load: destination)"},
         "role": {"type": "string", "enum": ["guitar", "bass", "drums", "synth", "keys",

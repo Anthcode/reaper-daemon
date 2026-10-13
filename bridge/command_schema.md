@@ -808,6 +808,16 @@ For get_transcription_source and insert_drum_transcription, see
 > unattended use, set that preference to "in-project MIDI" once, or pre-set the
 > project's MIDI import mode.
 
+### insert_track_template
+```json
+{ "path": "C:/.../TrackTemplates/instrument-monarch-drums.RTrackTemplate" }
+```
+Adds a saved track template's tracks at the end of the active project through
+REAPER's own loader, which keeps the sends between the template's tracks. Track
+selection is restored. Result: `added` (`index`, `name`, `guid` of each new
+track) and `count`. `BAD_PATH` unless an absolute `.RTrackTemplate`,
+`TEMPLATE_NOT_FOUND`, `TEMPLATE_INSERT_FAILED` if REAPER added nothing.
+
 ### new_project_tab
 ```json
 {}

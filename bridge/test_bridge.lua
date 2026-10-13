@@ -2091,4 +2091,34 @@ dofile(join(here,"test_transcription.lua"))(B,ok,eq)
   for k in pairs(reaper) do reaper[k]=old[k] end
 end)()
 
+;(function()
+  local old={}
+  for k,v in pairs(reaper) do old[k]=v end
+  local tracks={{guid='{a}',name='Song',sel=true}}
+  local opened
+  reaper.CountTracks=function() return #tracks end
+  reaper.GetTrack=function(_,i) return tracks[i+1] end
+  reaper.GetTrackGUID=function(t) return t.guid end
+  reaper.GetTrackName=function(t) return true,t.name end
+  reaper.IsTrackSelected=function(t) return t.sel end
+  reaper.SetTrackSelected=function(t,v) t.sel=v end
+  reaper.SetOnlyTrackSelected=function(t) for _,x in ipairs(tracks) do x.sel=(x==t) end end
+  reaper.ValidatePtr=function() return true end
+  reaper.UpdateArrange=function() end
+  reaper.Main_openProject=function(path) opened=path
+    if path:find('rig') then tracks[#tracks+1]={guid='{m}',name='Monarch'}; tracks[#tracks+1]={guid='{k}',name='Kick'} end end
+  local f=io.open('test-rig.RTrackTemplate','w'); f:write('<TRACK>'); f:close()
+  local r=B.handlers.insert_track_template({payload={path='test-rig.RTrackTemplate'}})
+  eq(opened,'test-rig.RTrackTemplate','REAPER loads the template')
+  eq(r.count,2,'two tracks added'); eq(r.added[1].name,'Monarch','added tracks reported in order')
+  eq(r.added[1].index,2,'added after the existing track'); eq(r.added[2].guid,'{k}','added by GUID')
+  eq(tracks[1].sel,true,'original selection restored'); eq(tracks[2].sel,false,'new tracks not left selected')
+  local g=io.open('empty.RTrackTemplate','w'); g:write('x'); g:close()
+  eq(pcall(B.handlers.insert_track_template,{payload={path='empty.RTrackTemplate'}}),false,'no tracks added is a failure')
+  eq(pcall(B.handlers.insert_track_template,{payload={path='song.rpp'}}),false,'only track templates')
+  eq(pcall(B.handlers.insert_track_template,{payload={path='missing.RTrackTemplate'}}),false,'missing file refused')
+  os.remove('test-rig.RTrackTemplate'); os.remove('empty.RTrackTemplate')
+  for k in pairs(reaper) do reaper[k]=old[k] end
+end)()
+
 print(("test_bridge: OK (%d checks)"):format(checks))

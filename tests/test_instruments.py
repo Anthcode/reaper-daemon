@@ -136,3 +136,81 @@ def test_mcp_instruments_list_and_guarded_load(monkeypatch):
     assert "nolly-bass" in out["content"][0]["text"]
     out = tool({"action": "load", "name": "argent-l"})
     assert out.get("isError") and "track" in out["content"][0]["text"]
+
+
+# underforth's real layout (2026-10-13): Monarch feeds the Drum Buss folder and
+# Track 22 (parallel smash), which Kick and Snare also feed.
+UF = [("Track 1", 1), ("Track 2", 0), ("Track 3", -1), ("underforth-bass", 0),
+      ("Monarch", 0), ("Drum Buss", 1), ("Kick", 0), ("Snare", 0), ("Toms Sum", 1),
+      ("Rack-1", 0), ("Rack-2", 0), ("Floor-L", 0), ("Floor-R1", 0), ("Floor-R2", -1),
+      ("Overheads", 0), ("Rooms", 1), ("Close Room", 0), ("Far Room", -1), ("Cymbals", 0),
+      ("Hi Hats", 0), ("Ride", -1), ("Track 22", 0)]
+UF_SENDS = {"Monarch": ["Drum Buss", "Kick", "Snare", "Rack-1", "Rack-2", "Floor-L",
+                        "Floor-R1", "Floor-R2", "Overheads", "Close Room", "Far Room",
+                        "Cymbals", "Hi Hats", "Ride"],
+            "Kick": ["Monarch", "Track 22"], "Snare": ["Monarch", "Track 22"],
+            "Toms Sum": ["Track 22"]}
+
+
+def _uf(layout=UF, sends=UF_SENDS):
+    tracks = [{"index": i + 1, "name": n, "guid": "{" + n + "}", "folder_depth": d, "fx": []}
+              for i, (n, d) in enumerate(layout)]
+    tracks.append({"index": 0, "name": "MASTER", "guid": "{master}", "folder_depth": 0})
+    return tracks, {"{" + k + "}": ["{" + x + "}" for x in v] for k, v in sends.items()}
+
+
+def test_rig_span_is_monarch_through_the_smash_bus():
+    tracks, sends = _uf()
+    span = inst.rig_span(tracks, sends, "{Monarch}")
+    assert span[0] == "{Monarch}" and span[-1] == "{Track 22}" and len(span) == 18
+
+
+def test_rig_span_refuses_a_stray_track_or_a_leaky_folder():
+    layout = UF[:5] + [("Vocal idea", 0)] + UF[5:]  # between Monarch and its buss
+    tracks, sends = _uf(layout)
+    with pytest.raises(inst.InstrumentError, match="Vocal idea"):
+        inst.rig_span(tracks, sends, "{Monarch}")
+    # Monarch inside someone else's folder, feeding a track past the folder's end
+    leaky = [("Song", 1), ("Monarch", -1), ("Kick", 0)]
+    tracks, sends = _uf(leaky, {"Monarch": ["Kick"]})
+    with pytest.raises(inst.InstrumentError, match="self-contained"):
+        inst.rig_span(tracks, sends, "{Monarch}")
+
+
+class RigBridge(FakeBridge):
+    def __init__(self):
+        tracks, self.sends = _uf()
+        super().__init__(tracks=tracks)
+
+    def __call__(self, kind, payload, **kw):
+        if kind == "get_track_routing":
+            self.calls.append((kind, payload))
+            return {"ok": True, "data": {"sends": [{"target_track_guid": g} for g in
+                                                   self.sends.get(payload["target_track_guid"], [])]}}
+        if kind == "save_project_as":
+            self.calls.append((kind, payload))
+            open(payload["path"], "w").close()
+            return {"ok": True, "data": {}}
+        if kind == "insert_track_template":
+            self.calls.append((kind, payload))
+            return {"ok": True, "data": {"added": [{"name": "Monarch", "guid": "{new-m}"},
+                                                   {"name": "Kick", "guid": "{new-k}"}]}}
+        return super().__call__(kind, payload, **kw)
+
+
+def test_save_and_load_a_rig(root, tmp_path):
+    bridge = RigBridge()
+    entry, names = inst.save_rig(root, bridge, "monarch-drums", "Monarch", "drums",
+                                 resource_dir=str(tmp_path))
+    saved = [p for k, p in bridge.calls if k == "save_project_as"][0]
+    assert saved["template"] is True and len(saved["track_guids"]) == 18
+    assert saved["path"].endswith("instrument-monarch-drums.RTrackTemplate")
+    assert names[0] == "Monarch" and names[-1] == "Track 22"
+    lib = inst.load_library(root)
+    assert lib["monarch-drums"]["play_track"] == "Monarch"
+    assert lib["monarch-drums"]["maps"] == {"drums": "RS Monarch"}  # kept from the catalog
+    with pytest.raises(inst.InstrumentError, match="overwrite"):
+        inst.save_rig(root, RigBridge(), "monarch-drums", "Monarch", "drums",
+                      resource_dir=str(tmp_path))
+    entry, added, play = inst.load_rig(root, RigBridge(), "monarch-drums")
+    assert play == "{new-m}" and len(added) == 2

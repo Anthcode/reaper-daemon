@@ -1823,7 +1823,23 @@ def cmd_instrument(args):
                 notes=args.notes, overwrite=args.overwrite)
             print(f"[instrument] saved {args.name!r}: {inst.describe(dict(entry, name=args.name))}")
             return 0
+        if args.action == "save-rig":
+            entry, names = inst.save_rig(
+                br, sender, args.name, args.track, args.role, library=args.library,
+                maps=_parse_maps(args.map), tags=args.tag or None, notes=args.notes,
+                overwrite=args.overwrite)
+            print(f"[instrument] saved rig {args.name!r} ({len(names)} tracks): "
+                  f"{', '.join(names)}")
+            return 0
+        if args.action == "load" and inst.load_library(br).get(args.name, {}).get("rig"):
+            entry, added, _play = inst.load_rig(br, sender, args.name)
+            print(f"[instrument] loaded rig {args.name!r}: {len(added)} tracks added, "
+                  f"MIDI goes to {entry.get('play_track')!r}")
+            return 0
         if args.action == "load":
+            if not args.track:
+                print("error: a chain instrument needs --track", file=sys.stderr)
+                return 1
             entry, data = inst.load_onto_track(br, sender, args.name, args.track,
                                                allow_existing_fx=args.append)
             print(f"[instrument] loaded {args.name!r} onto {args.track!r}: "
@@ -2082,9 +2098,19 @@ def build_parser():
     i.add_argument("--tag", action="append", help="repeatable, e.g. --tag pad --tag dark")
     i.add_argument("--notes")
     i.add_argument("--overwrite", action="store_true", help="replace an existing saved chain")
-    i = isub.add_parser("load", help="load a named instrument onto an empty track")
+    i = isub.add_parser("save-rig", help="save an instrument track plus every track it "
+                        "feeds (multi-out kits) as a named rig")
     i.add_argument("name")
-    i.add_argument("--track", required=True)
+    i.add_argument("--track", required=True, help="the instrument track that receives MIDI")
+    i.add_argument("--role", required=True)
+    i.add_argument("--library")
+    i.add_argument("--map", action="append", help="note map, kind=name")
+    i.add_argument("--tag", action="append")
+    i.add_argument("--notes")
+    i.add_argument("--overwrite", action="store_true")
+    i = isub.add_parser("load", help="load a named instrument (a rig adds its own tracks)")
+    i.add_argument("name")
+    i.add_argument("--track", help="destination track for a chain instrument")
     i.add_argument("--append", action="store_true", help="allow a track that already has FX")
     i = isub.add_parser("remove", help="remove an instrument from your library")
     i.add_argument("name")

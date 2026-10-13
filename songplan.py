@@ -379,9 +379,21 @@ def draft(sheet, bridge_root, sender, *, seed=101, out_dir=None, render=None):
             tracks.append((label, parts[role]))
     for layer, name in (parts.get("layers") or {}).items():
         tracks.append((layer, name))
+    targets = {}  # track label -> bridge selector the MIDI goes to
     for track, instrument in tracks:
-        need(f"add track {track}", send("add_track", {"name": track}))
         entry = library[instrument]
+        if entry.get("rig"):
+            # A rig brings its own tracks (instrument + everything it feeds);
+            # the part's MIDI goes to the rig's play track, by GUID.
+            try:
+                _, added, play = inst.load_rig(bridge_root, send, instrument)
+                step(f"load rig {instrument} ({len(added)} tracks) for {track}", {"ok": True})
+                targets[track] = {"target_track_guid": play}
+            except inst.InstrumentError as e:
+                step(f"load rig {instrument} for {track}", {"ok": False, "message": str(e)})
+            continue
+        need(f"add track {track}", send("add_track", {"name": track}))
+        targets[track] = {"target_track_name": track}
         if entry.get("chain"):
             step(f"load {instrument} on {track}",
                  send("add_fx_chain", {"target_track_name": track, "chain_name": entry["chain"]}))
@@ -404,7 +416,8 @@ def draft(sheet, bridge_root, sender, *, seed=101, out_dir=None, render=None):
 
     at = {"type": "bar", "bar": 1}
     if parts.get("drums") and any(sec.get("drums") for sec in sheet["sections"]):
-        rc, msg = render.render_groove(bridge_root, dsl_text=drum_dsl(sheet), track="drums",
+        rc, msg = render.render_groove(bridge_root, dsl_text=drum_dsl(sheet),
+                                       track=targets.get("drums", {"target_track_name": "drums"}),
                                        kit_map=drum_map_for(sheet, library), seed=seed,
                                        position=at, tempo=sheet["tempo"], sender=rsend,
                                        tag="draft/drums")
@@ -421,7 +434,9 @@ def draft(sheet, bridge_root, sender, *, seed=101, out_dir=None, render=None):
                                      ("bass", "bass", "bass", seed + 303)):
             if not parts.get(role):
                 continue
-            rc, msg = render.render_shred(bridge_root, part=part, track=track, seed=s,
+            rc, msg = render.render_shred(bridge_root, part=part,
+                                          track=targets.get(track, {"target_track_name": track}),
+                                          seed=s,
                                           map_name=gmap, tempo=sheet["tempo"],
                                           bars_file=bars_file,
                                           low_string=sheet.get("low_string"), position=at,
@@ -432,7 +447,8 @@ def draft(sheet, bridge_root, sender, *, seed=101, out_dir=None, render=None):
         if not events:
             continue
         step(f"layer {layer}", send("insert_midi_events", {
-            "target_track_name": layer, "time_unit": "beats", "start_bar": 1,
+            **targets.get(layer, {"target_track_name": layer}), "time_unit": "beats",
+            "start_bar": 1,
             "length_beats": total_bars(sheet) * 4, "events": events}))
     report["ok"] = all(s["ok"] for s in report["steps"]) and not report["problems"]
     report["note"] = ("Drafted into a new, unsaved project tab. Listen, then save it "

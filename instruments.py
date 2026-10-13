@@ -15,6 +15,12 @@ Two layers, merged by name (the user layer wins):
 
 Chains are written to REAPER's FXChains folder as `instrument-<name>.RfxChain`,
 so the same sound also shows up in REAPER's own FX chain browser.
+
+A multi-output instrument (a Kontakt drum kit feeding Kick, Snare, room tracks
+and buses) only sounds through that routing, which a chain can't hold. Those
+are saved as a RIG: the instrument track plus every track its sends and folders
+reach, as a REAPER track template (`TrackTemplates/instrument-<name>`). Loading
+a rig adds all of its tracks; MIDI goes to its `play_track`.
 """
 
 import json
@@ -157,7 +163,12 @@ def describe(entry):
         bits.append("maps " + ", ".join(f"{k}={v}" for k, v in entry["maps"].items()))
     if entry.get("range"):
         bits.append(f"notes {entry['range'][0]}-{entry['range'][1]}")
-    bits.append("chain " + entry["chain"] if entry.get("chain") else "NO CHAIN (load the sound once, then save)")
+    if entry.get("rig"):
+        bits.append(f"rig of {len(entry.get('rig_tracks') or [])} tracks, play {entry.get('play_track')}")
+    elif entry.get("chain"):
+        bits.append("chain " + entry["chain"])
+    else:
+        bits.append("NO CHAIN (load the sound once, then save)")
     if entry.get("tags"):
         bits.append("tags " + " ".join(entry["tags"]))
     return " | ".join(bits)
@@ -223,3 +234,128 @@ def load_onto_track(bridge_root, sender, name, track, allow_existing_fx=False):
 def _err(res):
     e = res.get("error") or {}
     return e.get("code") or res.get("message") or "unknown error"
+
+
+# --- rigs: an instrument plus the tracks it feeds -------------------------------
+
+def rig_span(tracks, sends, play_guid):
+    """GUIDs of the contiguous track block that makes up the rig, in order.
+
+    `tracks` is get_context's list (index, guid, name, folder_depth); `sends`
+    maps guid -> [destination guids]. Start at the instrument track, follow
+    sends and folder children until nothing new is reached, then take the
+    contiguous block from the first to the last reached track. The block must
+    be self-contained: its folders open and close inside it, so the template
+    can't drag in, or cut off, part of someone else's folder.
+    """
+    ordered = [t for t in tracks if t.get("index", 0) > 0]
+    pos = {t["guid"]: i for i, t in enumerate(ordered)}
+    if play_guid not in pos:
+        raise InstrumentError("the instrument track isn't in the project")
+
+    def children(i):
+        depth, out = 0, []
+        if ordered[i].get("folder_depth", 0) != 1:
+            return out
+        for j in range(i, len(ordered)):
+            if j > i:
+                out.append(ordered[j]["guid"])
+            depth += int(ordered[j].get("folder_depth", 0))
+            if depth <= 0 and j > i:
+                break
+        return out
+
+    reached, todo = {play_guid}, [play_guid]
+    while todo:
+        g = todo.pop()
+        for nxt in list(sends.get(g, [])) + children(pos[g]):
+            if nxt in pos and nxt not in reached:
+                reached.add(nxt)
+                todo.append(nxt)
+    lo, hi = min(pos[g] for g in reached), max(pos[g] for g in reached)
+    block = ordered[lo:hi + 1]
+    depth = 0
+    for t in block:
+        depth += int(t.get("folder_depth", 0))
+        if depth < 0:
+            break
+    if depth != 0:
+        raise InstrumentError(
+            "the tracks this instrument feeds don't form a self-contained block "
+            f"({block[0]['name']} to {block[-1]['name']}); its folders reach outside it")
+    stray = [t["name"] for t in block if t["guid"] not in reached]
+    if stray:
+        raise InstrumentError("these tracks sit inside the rig's block but aren't fed by the "
+                              f"instrument: {', '.join(stray)}. Move them out, or save a chain")
+    return [t["guid"] for t in block]
+
+
+def template_path(name, resource_dir=None):
+    if resource_dir is None:
+        import reaperd
+        resource_dir = reaperd.find_resource_dir()
+    if not resource_dir:
+        raise InstrumentError("REAPER's resource folder wasn't found (set REAPER_RESOURCE_PATH)")
+    return os.path.join(resource_dir, "TrackTemplates", CHAIN_PREFIX + name + ".RTrackTemplate")
+
+
+def save_rig(bridge_root, sender, name, play_track, role, *, library=None, maps=None,
+             tags=None, notes=None, overwrite=False, resource_dir=None):
+    """Save an instrument track and everything it feeds as a named rig."""
+    lib = load_library(bridge_root)
+    existing = lib.get(name, {})
+    entry = {k: v for k, v in existing.items() if k not in ("name", "source")}
+    entry.update({k: v for k, v in {"role": role, "library": library, "maps": maps,
+                                    "tags": tags, "notes": notes}.items() if v is not None})
+    mk = known_maps(bridge_root)
+    validate_entry(name, entry, mk)
+    ctx = sender("get_context", {})
+    if not ctx.get("ok"):
+        raise InstrumentError(f"could not read the project: {_err(ctx)}")
+    tracks = (ctx.get("data") or {}).get("tracks") or []
+    hit = [t for t in tracks if t.get("name") == play_track and t.get("index", 0) > 0]
+    if len(hit) != 1:
+        raise InstrumentError(f"{len(hit)} tracks are named {play_track!r}; need exactly one")
+    sends = {}
+    for t in tracks:
+        if t.get("index", 0) <= 0:
+            continue
+        r = sender("get_track_routing", {"target_track_guid": t["guid"]})
+        if not r.get("ok"):
+            raise InstrumentError(f"could not read routing of {t['name']!r}: {_err(r)}")
+        sends[t["guid"]] = [s.get("target_track_guid") for s in
+                            (r.get("data") or {}).get("sends") or []]
+    guids = rig_span(tracks, sends, hit[0]["guid"])
+    names = [t["name"] for g in guids for t in tracks if t["guid"] == g]
+    path = template_path(name, resource_dir)
+    if os.path.exists(path):
+        if not overwrite:
+            raise InstrumentError(f"{name!r} already has a saved rig at {path}; "
+                                  "pass overwrite to replace it")
+        os.remove(path)
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    res = sender("save_project_as", {"path": path, "template": True, "track_guids": guids})
+    if not res.get("ok"):
+        raise InstrumentError(f"saving the rig failed: {_err(res)}")
+    entry.update({"rig": path, "play_track": play_track, "rig_tracks": names})
+    return register(bridge_root, name, entry, mk), names
+
+
+def load_rig(bridge_root, sender, name):
+    """Add a saved rig's tracks to the active project. Returns (entry, added, play_guid)."""
+    entry = load_library(bridge_root).get(name)
+    if not entry:
+        raise InstrumentError(f"no instrument named {name!r} (try: instrument list)")
+    if not entry.get("rig"):
+        raise InstrumentError(f"{name!r} is a chain, not a rig; load it onto a track")
+    if not os.path.isfile(entry["rig"]):
+        raise InstrumentError(f"the rig file is missing: {entry['rig']}")
+    res = sender("insert_track_template", {"path": entry["rig"]})
+    if not res.get("ok"):
+        raise InstrumentError(f"loading the rig failed: {_err(res)}")
+    added = (res.get("data") or {}).get("added") or []
+    play = [t for t in added if t.get("name") == entry.get("play_track")]
+    if len(play) != 1:
+        raise InstrumentError(f"the rig loaded but its play track {entry.get('play_track')!r} "
+                              f"wasn't found exactly once among {[t.get('name') for t in added]}")
+    return entry, added, play[0]["guid"]

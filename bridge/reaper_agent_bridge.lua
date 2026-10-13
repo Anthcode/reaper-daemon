@@ -4501,7 +4501,49 @@ handlers.set_time_selection = command_set_time_selection
 handlers.set_tempo = command_set_tempo
 handlers.render = command_render
 handlers.save_project = command_save_project
-for _, name in ipairs({"link_fx_midi_cc", "get_midi_inputs", "configure_midi_input", "insert_midi_events", "save_project_as", "get_fx_preset", "set_fx_preset"}) do handlers[name] = fx_chain.performance[name] end
+
+-- Insert a saved .RTrackTemplate (a whole routed rig: an instrument track plus
+-- the tracks its outputs feed) at the end of the active project, and report
+-- exactly which tracks it added, by GUID. REAPER's own template loader keeps
+-- the sends between the template's tracks intact, which a hand-spliced chunk
+-- would not (receives are stored as track indexes). Track selection is
+-- cleared first so the tracks land at the end, then restored.
+handlers.insert_track_template = function(command)
+  local p = command.payload or {}
+  local path = p.path
+  if type(path) ~= "string" or path:find("[\r\n%z]") or
+      path:sub(-15):lower() ~= ".rtracktemplate" then
+    error("BAD_PATH: path must be an absolute .RTrackTemplate file")
+  end
+  if not exists(path) then error("TEMPLATE_NOT_FOUND: " .. path) end
+  if command.dry_run or p.dry_run then return { path = path, dry_run = true } end
+  local before, selected = {}, {}
+  local n = reaper.CountTracks(0)
+  for i = 0, n - 1 do
+    local t = reaper.GetTrack(0, i)
+    before[reaper.GetTrackGUID(t)] = true
+    if reaper.IsTrackSelected(t) then selected[#selected + 1] = t end
+    reaper.SetTrackSelected(t, false)
+  end
+  if n > 0 then reaper.SetOnlyTrackSelected(reaper.GetTrack(0, n - 1)) end
+  reaper.Main_openProject(path)
+  local added = {}
+  for i = 0, reaper.CountTracks(0) - 1 do
+    local t = reaper.GetTrack(0, i)
+    local guid = reaper.GetTrackGUID(t)
+    if not before[guid] then
+      local _, name = reaper.GetTrackName(t, "")
+      added[#added + 1] = { index = i + 1, name = name, guid = guid }
+    end
+  end
+  for i = 0, reaper.CountTracks(0) - 1 do reaper.SetTrackSelected(reaper.GetTrack(0, i), false) end
+  for _, t in ipairs(selected) do
+    if reaper.ValidatePtr(t, "MediaTrack*") then reaper.SetTrackSelected(t, true) end
+  end
+  if #added == 0 then error("TEMPLATE_INSERT_FAILED: REAPER added no tracks from " .. path) end
+  reaper.UpdateArrange()
+  return { path = path, added = added, count = #added }
+end
 
 -- Open an empty project tab and make it active, so a draft is written into a
 -- fresh project instead of whatever song is open. The previous tab is left

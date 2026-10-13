@@ -13,6 +13,8 @@ python reaperd.py instrument show argent-l
 python reaperd.py instrument save dark-pad --track Pad --role synth --library "Serum 2: PD - Dark Matter" --range 36-96 --tag pad --tag dark
 python reaperd.py instrument load dark-pad --track Pad
 python reaperd.py instrument remove dark-pad
+python reaperd.py instrument save-rig monarch-drums --track Monarch --role drums
+python reaperd.py instrument load monarch-drums          # a rig adds its own tracks
 ```
 
 MCP: the `instruments` tool, with the same actions.
@@ -30,6 +32,16 @@ splices it onto an empty track and checks that it landed.
 | `range` | `[low, high]` playable MIDI notes, when known |
 | `articulations` | `{name: keyswitch note}` for libraries not covered by a map |
 | `chain` | saved chain name, or absent until the sound is saved once |
+| `rig`, `play_track`, `rig_tracks` | for multi-output instruments: the track template, the track that takes MIDI, and the tracks it adds |
+
+**Rigs.** A Kontakt drum kit with multiple outputs plays through its routing:
+Kick, Snare, room and bus tracks fed from separate outputs. A chain can't hold
+that, so loaded alone such a kit is silent. `save-rig` starts at the
+instrument track, follows its sends and folders, and saves that self-contained
+block of tracks as `TrackTemplates/instrument-<name>.RTrackTemplate` (no media
+items). It refuses a block that contains an unrelated track or a folder
+reaching outside it. Loading a rig adds all of its tracks (bridge
+`insert_track_template`); the planner sends that part's MIDI to the play track.
 
 `instruments/catalog.json` ships the libraries the generators already know,
 without chains. Your saved sounds go in `instruments/user.json`, which stays

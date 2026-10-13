@@ -127,7 +127,8 @@ class FakeRender:
         return 0, "ok"
 
     def render_shred(self, br, **kw):
-        self.calls.append((kw["track"], kw))
+        sel = kw["track"]
+        self.calls.append((sel.get("target_track_name", sel) if isinstance(sel, dict) else sel, kw))
         return 0, "ok"
 
 
@@ -196,3 +197,18 @@ def test_draft_warns_about_a_kit_that_needs_its_routing(tmp_path, monkeypatch):
     rep = sp.draft(sp.approve(sheet()), REPO, fake_sender([]), render=FakeRender(),
                    out_dir=str(tmp_path))
     assert any("multi-output routing" in p for p in rep["problems"])
+
+
+def test_draft_with_a_rig_sends_drum_midi_to_its_play_track(tmp_path, monkeypatch):
+    lib = sp.inst.load_library(REPO)
+    lib["monarch-drums"] = dict(lib["monarch-drums"], rig=str(tmp_path / "r.RTrackTemplate"),
+                                play_track="Monarch", rig_tracks=["Monarch", "Kick"])
+    monkeypatch.setattr(sp.inst, "load_library", lambda root, include_user=True: lib)
+    monkeypatch.setattr(sp.inst, "load_rig",
+                        lambda root, send, name: (lib[name], [{}, {}], "{rig-monarch}"))
+    log, render = [], FakeRender()
+    rep = sp.draft(sp.approve(sheet()), REPO, fake_sender(log), render=render,
+                   out_dir=str(tmp_path))
+    assert "drums" not in [p["name"] for k, p in log if k == "add_track"]
+    assert render.calls[0][1]["track"] == {"target_track_guid": "{rig-monarch}"}
+    assert not any("drums:" in p for p in rep["problems"])
