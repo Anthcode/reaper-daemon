@@ -1991,6 +1991,58 @@ end
     eq(pcall(B.performance.validate_events,payload(event)),false,'invalid event rejected before creation')
   end
   ok(B.performance.validate_events(payload({type='pitch_bend',time=2,value=8192})), 'center bend accepted')
+  local note={type='note',time=4,duration=4,pitch=40,velocity=100}
+  ok(B.performance.validate_events({time_unit='beats',start_bar=9,length_beats=8,events={note}}), 'beats from a bar')
+  ok(B.performance.validate_events({time_unit='beats',start_beats=32,length_beats=8,events={note}}), 'beats from a quarter-note position')
+  for _,bad in ipairs({
+    {time_unit='beats',start_bar=9,length_beats=6,events={note}},
+    {time_unit='beats',length_beats=8,events={note}},
+    {time_unit='beats',start_bar=9,start_beats=32,length_beats=8,events={note}},
+    {time_unit='beats',start_bar=0,length_beats=8,events={note}},
+    {time_unit='beats',start_bar=9.5,length_beats=8,events={note}},
+    {time_unit='beats',start_bar=9,start_seconds=0,length_beats=8,events={note}},
+    {start_seconds=0,length_seconds=8,start_bar=9,events={note}},
+    {time_unit='ticks',start_seconds=0,length_seconds=8,events={note}},
+  }) do
+    eq(pcall(B.performance.validate_events,bad),false,'mixed or out-of-range beat timing rejected')
+  end
+end)()
+;(function()
+  local old={}
+  for k,v in pairs(reaper) do old[k]=v end
+  local st={notes={},ccs={}}
+  -- 120 bpm 4/4: a bar is 4 QN, a QN is 0.5 s; 960 PPQ from item start.
+  reaper.GetTrack=function() return 'trk' end
+  reaper.CountTracks=function() return 1 end
+  reaper.GetTrackName=function() return true,'Lead' end
+  reaper.GetTrackGUID=function() return '{lead}' end
+  reaper.GetMediaTrackInfo_Value=function() return 1 end
+  reaper.TimeMap2_beatsToTime=function(_,beats,measures) return (measures*4+beats)*0.5 end
+  reaper.TimeMap2_timeToQN=function(_,t) return t/0.5 end
+  reaper.TimeMap2_timeToBeats=function(_,t) return (t/0.5)%4, math.floor(t/0.5/4) end
+  reaper.CreateNewMIDIItemInProj=function(_,a,b,qn) st.created={a,b,qn}; return 'item' end
+  reaper.GetActiveTake=function() return 'take' end
+  reaper.MIDI_GetPPQPosFromProjQN=function(_,qn) return (qn-st.created[1])*960 end
+  reaper.MIDI_InsertNote=function(_,_,_,s,e,ch,pitch,vel) st.notes[#st.notes+1]={s,e,pitch,vel}; return true end
+  reaper.MIDI_InsertCC=function(_,_,_,ppq,status,ch,a,b) st.ccs[#st.ccs+1]={ppq,status,a,b}; return true end
+  reaper.MIDI_Sort=function() end
+  reaper.MIDI_CountEvts=function() return true,#st.notes,#st.ccs end
+  reaper.GetMediaItemInfo_Value=function(_,k) if k=='D_POSITION' then return st.created[1]*0.5 end return (st.created[2]-st.created[1])*0.5 end
+  reaper.DeleteTrackMediaItem=function() st.deleted=true end
+  reaper.UpdateArrange=function() end
+  local r=B.performance.insert_midi_events({payload={target_track_guid='{lead}',time_unit='beats',start_bar=9,length_beats=8,
+    events={{type='cc',time=0,controller=1,value=64},{type='note',time=1.5,duration=0.5,pitch=40,velocity=101}}}})
+  eq(st.created[1],32,'bar 9 starts at QN 32')
+  eq(st.created[2],40,'item spans 8 QN')
+  eq(st.created[3],true,'item created in QN units')
+  eq(st.notes[1][1],1440,'note starts 1.5 QN into the item')
+  eq(st.notes[1][2],1920,'note ends 2 QN into the item')
+  eq(st.ccs[1][1],0,'CC at item start')
+  eq(r.time_unit,'beats','reply names the unit')
+  eq(r.start_bar,9,'reply reads back the start bar')
+  eq(r.start_seconds,16,'reply reads back the real item position')
+  eq(st.deleted,nil,'a good insert keeps its item')
+  for k in pairs(reaper) do reaper[k]=old[k] end
 end)()
 ;(function()
   local old={}

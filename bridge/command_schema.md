@@ -808,6 +808,20 @@ For get_transcription_source and insert_drum_transcription, see
 > unattended use, set that preference to "in-project MIDI" once, or pre-set the
 > project's MIDI import mode.
 
+### insert_midi_events
+Create a new MIDI item from a list of notes, CC, pitch bend and program changes.
+```json
+{ "target_track_name": "Lead", "time_unit": "beats", "start_bar": 9, "length_beats": 8,
+  "events": [ { "type": "cc", "time": 0, "controller": 1, "value": 64 },
+              { "type": "note", "time": 1.5, "duration": 0.5, "pitch": 43, "velocity": 87 } ] }
+```
+`time_unit` is `seconds` (default: `start_seconds`, `length_seconds`) or `beats`
+(`start_bar` 1-based or `start_beats` in project quarter notes, plus `length_beats`).
+Event `time`/`duration` use the same unit, relative to the item start. Mixed units
+are `BAD_PAYLOAD`. All events are validated before the item is created; an insert or
+count-check failure deletes the new item. Full event reference:
+`docs/keyboard-performance.md`.
+
 ### get_midi_notes
 
 Read the notes in a take. Read-only.

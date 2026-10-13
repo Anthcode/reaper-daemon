@@ -4148,16 +4148,40 @@ fx_chain.performance = (function(reaper, find_track, find_fx, gate)
       armed=reaper.GetMediaTrackInfo_Value(track,'I_RECARM'),
       monitoring=reaper.GetMediaTrackInfo_Value(track,'I_RECMON')}
   end
+  -- Where an event list sits, in one of two units. Seconds (the default) is
+  -- exact wall-clock placement. Beats is how music is written: start_bar or
+  -- start_beats (project quarter notes), length_beats, and every event time and
+  -- duration in quarter notes from the item start, so the notes follow the
+  -- tempo map instead of drifting off the grid at the first tempo change.
+  -- Mixed units are refused rather than guessed between.
+  function M.event_span(p)
+    local unit = p.time_unit
+    if unit == nil or unit == 'seconds' then
+      if p.start_bar ~= nil or p.start_beats ~= nil or p.length_beats ~= nil then
+        error('BAD_PAYLOAD: start_bar/start_beats/length_beats need time_unit "beats"')
+      end
+      number(p.start_seconds,0,1e8)
+      return 'seconds', number(p.length_seconds,0.001,86400)
+    end
+    if unit ~= 'beats' then error('BAD_PAYLOAD: time_unit must be "seconds" or "beats"') end
+    if p.start_seconds ~= nil or p.length_seconds ~= nil then
+      error('BAD_PAYLOAD: start_seconds/length_seconds are not used with time_unit "beats"')
+    end
+    if (p.start_bar == nil) == (p.start_beats == nil) then
+      error('BAD_PAYLOAD: time_unit "beats" needs exactly one of start_bar or start_beats')
+    end
+    if p.start_bar ~= nil then number(p.start_bar,1,100000,true) else number(p.start_beats,0,1e7) end
+    return 'beats', number(p.length_beats,1/960,1e6)
+  end
   function M.validate_events(p)
-    number(p.start_seconds,0,1e8)
-    number(p.length_seconds,0.001,86400)
+    local _, length = M.event_span(p)
     if type(p.events) ~= 'table' or #p.events == 0 or #p.events > 10000 then error('BAD_PAYLOAD: 1..10000 events required') end
     for _, e in ipairs(p.events) do
-      number(e.time,0,p.length_seconds)
+      number(e.time,0,length)
       number(e.channel or 0,0,15,true)
       if e.type == 'note' then
         number(e.pitch,0,127,true); number(e.velocity,1,127,true)
-        number(e.duration,0.000001,p.length_seconds-e.time)
+        number(e.duration,0.000001,length-e.time)
       elseif e.type == 'cc' then
         number(e.controller,0,127,true); number(e.value,0,127,true)
       elseif e.type == 'pitch_bend' then number(e.value,0,16383,true)
@@ -4169,18 +4193,29 @@ fx_chain.performance = (function(reaper, find_track, find_fx, gate)
   function M.insert_midi_events(command)
     local p = command.payload or {}
     M.validate_events(p)
+    local unit = M.event_span(p)
     local track = find_track(p)
-    local item = reaper.CreateNewMIDIItemInProj(track,p.start_seconds,p.start_seconds+p.length_seconds,false)
+    local item, start_qn
+    if unit == 'beats' then
+      start_qn = p.start_beats or
+        reaper.TimeMap2_timeToQN(0, reaper.TimeMap2_beatsToTime(0, 0, p.start_bar - 1))
+      item = reaper.CreateNewMIDIItemInProj(track,start_qn,start_qn+p.length_beats,true)
+    else
+      item = reaper.CreateNewMIDIItemInProj(track,p.start_seconds,p.start_seconds+p.length_seconds,false)
+    end
     if not item then error('CREATE_FAILED') end
     local ok, result = pcall(function()
       local take = reaper.GetActiveTake(item)
+      local function ppq_at(t)
+        if unit == 'beats' then return reaper.MIDI_GetPPQPosFromProjQN(take,start_qn+t) end
+        return reaper.MIDI_GetPPQPosFromProjTime(take,p.start_seconds+t)
+      end
       local notes, controls = 0,0
       for _, e in ipairs(p.events) do
-        local ppq = reaper.MIDI_GetPPQPosFromProjTime(take,p.start_seconds+e.time)
+        local ppq = ppq_at(e.time)
         local success
         if e.type == 'note' then
-          success = reaper.MIDI_InsertNote(take,false,false,ppq,
-            reaper.MIDI_GetPPQPosFromProjTime(take,p.start_seconds+e.time+e.duration),
+          success = reaper.MIDI_InsertNote(take,false,false,ppq,ppq_at(e.time+e.duration),
             e.channel or 0,e.pitch,e.velocity,true)
           notes = notes+1
         else
@@ -4195,8 +4230,18 @@ fx_chain.performance = (function(reaper, find_track, find_fx, gate)
       reaper.MIDI_Sort(take)
       local _, n, c = reaper.MIDI_CountEvts(take)
       if n ~= notes or c ~= controls then error('VERIFY_FAILED: event count') end
-      return {track_guid=reaper.GetTrackGUID(track),notes=n,controls=c,
-        start_seconds=p.start_seconds,length_seconds=p.length_seconds}
+      -- Report where the item actually landed, read from REAPER, in both units.
+      local pos = reaper.GetMediaItemInfo_Value(item,'D_POSITION')
+      local len = reaper.GetMediaItemInfo_Value(item,'D_LENGTH')
+      local out = {track_guid=reaper.GetTrackGUID(track),notes=n,controls=c,
+        time_unit=unit,start_seconds=pos,length_seconds=len}
+      if unit == 'beats' then
+        local _, measure = reaper.TimeMap2_timeToBeats(0,pos)
+        out.start_beats = start_qn
+        out.length_beats = p.length_beats
+        out.start_bar = measure + 1
+      end
+      return out
     end)
     if not ok then reaper.DeleteTrackMediaItem(track,item); error(result) end
     reaper.UpdateArrange()

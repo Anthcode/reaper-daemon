@@ -2015,28 +2015,41 @@ for _name, _description, _props, _required, _track, _fx, _mutates in [
      ("Create a new MIDI item on one track from a list of raw events (notes, CC, pitch bend, "
       "program change), with no humanizing. Use this for exact, hand-specified MIDI; use "
       "insert_midi_file when a .mid already exists, insert_groove for humanized drums, "
-      "insert_riff for humanized guitar or bass, cut_band for a whole four-track jam. Event "
-      "times are seconds from the item start. For drums, keep the golden rule yourself: no drum "
-      "hits the same velocity twice in a row. Returns {track_guid, notes, controls, "
-      "start_seconds, length_seconds}. Errors: BAD_PAYLOAD (an event is out of range; nothing "
-      "is written), INSERT_FAILED / VERIFY_FAILED (the new item is deleted again). Undoable."),
-     {"start_seconds": {"type": "number", "minimum": 0,
-                        "description": "Project time in seconds where the new item starts."},
+      "insert_riff for humanized guitar or bass, cut_band for a whole four-track jam. Two "
+      "timing units. Default time_unit \"seconds\": start_seconds + length_seconds, event time "
+      "and duration in seconds from the item start. time_unit \"beats\" (use this to write "
+      "music): start_bar (1-based) or start_beats (project quarter notes), length_beats, and "
+      "event time and duration in quarter notes from the item start, so notes follow the tempo "
+      "map. Mixing units is refused. For drums, keep the golden rule yourself: no drum hits the "
+      "same velocity twice in a row. Returns {track_guid, notes, controls, time_unit, "
+      "start_seconds, length_seconds} plus start_bar/start_beats/length_beats in beats mode. "
+      "Errors: BAD_PAYLOAD (an event or the timing is out of range; nothing is written), "
+      "INSERT_FAILED / VERIFY_FAILED (the new item is deleted again). Undoable."),
+     {"time_unit": {"type": "string", "enum": ["seconds", "beats"],
+                    "description": "Default seconds. beats = quarter notes, tempo-map aware."},
+      "start_seconds": {"type": "number", "minimum": 0,
+                        "description": "seconds mode: project time where the new item starts."},
       "length_seconds": {"type": "number", "minimum": 0.001, "maximum": 86400,
-                         "description": "Item length in seconds; every event must fit inside it."},
+                         "description": "seconds mode: item length; every event must fit inside it."},
+      "start_bar": {"type": "integer", "minimum": 1,
+                    "description": "beats mode: 1-based bar the item starts on (or use start_beats)."},
+      "start_beats": {"type": "number", "minimum": 0,
+                      "description": "beats mode: project quarter-note position the item starts on."},
+      "length_beats": {"type": "number", "exclusiveMinimum": 0,
+                       "description": "beats mode: item length in quarter notes (4 = one 4/4 bar)."},
       "events": {"type": "array", "minItems": 1, "maxItems": 10000,
                  "description": "1..10000 events. Each needs type and time; the other fields depend on type.",
                  "items": {"type": "object", "required": ["type", "time"], "properties": {
                      "type": {"type": "string", "enum": ["note", "cc", "pitch_bend", "program_change"]},
-                     "time": {"type": "number", "minimum": 0, "description": "Seconds from item start."},
+                     "time": {"type": "number", "minimum": 0, "description": "From item start, in the payload's time_unit."},
                      "channel": {"type": "integer", "minimum": 0, "maximum": 15, "description": "0-based MIDI channel, default 0."},
                      "pitch": {"type": "integer", "minimum": 0, "maximum": 127, "description": "note only: MIDI note number (60 = middle C)."},
                      "velocity": {"type": "integer", "minimum": 1, "maximum": 127, "description": "note only."},
-                     "duration": {"type": "number", "description": "note only: seconds; must end inside the item."},
+                     "duration": {"type": "number", "description": "note only: in the payload's time_unit; must end inside the item."},
                      "controller": {"type": "integer", "minimum": 0, "maximum": 127, "description": "cc only: controller number."},
                      "value": {"type": "integer", "minimum": 0, "maximum": 16383,
                                "description": "cc and program_change: 0..127. pitch_bend: 0..16383, 8192 = centre."}}}}},
-     ["start_seconds", "length_seconds", "events"], True, False, True),
+     ["events"], True, False, True),
     ("save_project_as", "Save to a NEW absolute .rpp path, or export explicitly named tracks as a media-free .RTrackTemplate. Existing files are refused. Requires project save gate.",
      {"path": {"type": "string"}, "template": {"type": "boolean"}, "track_guids": {"type": "array", "items": {"type": "string"}}}, ["path"], True, True, True),
     ("get_fx_preset",
