@@ -64,6 +64,7 @@ jobs:
           mix_recipes.py
           instrument_inventory.py
           performance_audition.py
+          watchdog.py
           console_sidecar.py
           setup/install.py
           skills/drum-apparatus/groovegen.py

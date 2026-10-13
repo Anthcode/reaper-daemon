@@ -29,6 +29,7 @@ gate, because CI does not launch the DAW. See
 | `reaper_mcp.py` | MCP stdio server over the same bridge |
 | `console_sidecar.py` | Daemon Console broker (headless Claude session) |
 | `setup/install.py` | wires auto-start into REAPER |
+| `watchdog.py` | outside-REAPER supervisor for unattended runs |
 | `commands/examples/` | one JSON example per command |
 | `skills/drum-apparatus/` | drum DSL engine and kit-map discovery |
 | `skills/guitar-apparatus/` | guitar and bass riff notation and performance engine |

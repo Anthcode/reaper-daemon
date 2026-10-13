@@ -149,6 +149,7 @@ Claude Code session that always knows which track you have selected.
 | [Verify](docs/verify.md) | closed-loop mix moves with measured proof |
 | [Protocol](docs/protocol.md) | the file wire format |
 | [Troubleshooting](docs/troubleshooting.md) | silent captures, stale heartbeats |
+| [Watchdog](docs/watchdog.md) | unattended runs: relaunch REAPER, dialogs, stale queue files |
 | [Security](docs/security.md) | trust model and the optional token |
 | [Develop](docs/develop.md) | tests, CI, repo layout |
 
