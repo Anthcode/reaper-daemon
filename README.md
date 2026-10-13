@@ -150,6 +150,7 @@ Claude Code session that always knows which track you have selected.
 | [Protocol](docs/protocol.md) | the file wire format |
 | [Troubleshooting](docs/troubleshooting.md) | silent captures, stale heartbeats |
 | [Watchdog](docs/watchdog.md) | unattended runs: relaunch REAPER, dialogs, stale queue files |
+| [Song planner](docs/song-planner.md) | instrument library, song sheets, approved drafts |
 | [Security](docs/security.md) | trust model and the optional token |
 | [Develop](docs/develop.md) | tests, CI, repo layout |
 
@@ -157,7 +158,8 @@ Agents should read [AGENTS.md](AGENTS.md), [CLAUDE.md](CLAUDE.md), and
 [bridge/command_schema.md](bridge/command_schema.md). Two bundled skills,
 [arrangement-midi](skills/arrangement-midi/SKILL.md) and
 [drum-humanize](skills/drum-humanize/SKILL.md), cover MIDI composition and
-drum humanization.
+drum humanization. [song-planner](skills/song-planner/SKILL.md) plans and
+drafts whole songs from a brief, a riff or a reference.
 
 ## Security
 

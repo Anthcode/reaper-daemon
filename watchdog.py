@@ -314,6 +314,10 @@ def check(bridge_root, *, launch=False, dismiss_dialogs=False, sweep=True,
     running = reaperd.reaper_running() if running is None else running
     report["reaper_running"] = running
     state = bridge_state(bridge_root, now)
+    if running is False and state["state"] in ("connected", "busy"):
+        # The file outlives the process by up to FRESH_SECS; a heartbeat
+        # from a REAPER that is no longer running is not a live bridge.
+        state = dict(state, state="stale")
     report["bridge"] = state
 
     if running is False:
@@ -332,7 +336,8 @@ def check(bridge_root, *, launch=False, dismiss_dialogs=False, sweep=True,
                 report["actions"].append(f"launched {exe}")
                 report["launched_at"] = now
                 if wait_after_launch:
-                    report["bridge"] = _wait_for_heartbeat(bridge_root, wait_after_launch)
+                    report["bridge"] = _wait_for_heartbeat(bridge_root, wait_after_launch,
+                                                           since=now)
                     if report["bridge"]["state"] != "connected":
                         report["problems"].append(
                             f"launched REAPER but no fresh bridge heartbeat within "
@@ -374,13 +379,22 @@ def check(bridge_root, *, launch=False, dismiss_dialogs=False, sweep=True,
     return report
 
 
-def _wait_for_heartbeat(bridge_root, seconds):
+def _wait_for_heartbeat(bridge_root, seconds, since):
+    """Wait for a heartbeat written AFTER `since` (the launch). One left over
+    from the previous REAPER can still look fresh for a few seconds."""
+    hb = os.path.join(bridge_root, "bridge", "heartbeat.json")
     deadline = _now() + seconds
-    state = bridge_state(bridge_root)
+    state = {"state": "missing"}
     while _now() < deadline:
         state = bridge_state(bridge_root)
+        try:
+            new = os.path.getmtime(hb) > since
+        except OSError:
+            new = False
+        if state["state"] == "connected" and new:
+            return state
         if state["state"] == "connected":
-            break
+            state = dict(state, state="stale")
         time.sleep(2)
     return state
 
@@ -399,7 +413,10 @@ def _log(bridge_root, report):
 
 def summarize(report):
     b = report["bridge"]
-    head = (f"REAPER {'running' if report['reaper_running'] else 'closed' if report['reaper_running'] is False else 'unknown'}"
+    rr = report["reaper_running"]
+    proc = ("relaunched" if report.get("launched_at") else
+            "running" if rr else "closed" if rr is False else "unknown")
+    head = (f"REAPER {proc}"
             f" | bridge {b['state']}" + (f" ({b['age']}s)" if "age" in b else ""))
     lines = [("OK: " if report["ok"] else "PROBLEM: ") + head]
     lines += ["  did: " + a for a in report["actions"]]

@@ -114,3 +114,20 @@ def test_dialog_beside_a_live_bridge_is_a_notice_not_a_problem(tmp_path):
                        dismiss_dialogs=True)
     assert r["ok"] and r["actions"] == []
     assert r["notices"] == ['REAPER shows dialog "About REAPER": REAPER IS NOT FREE.']
+
+
+def test_heartbeat_of_a_closed_reaper_is_not_live(tmp_path):
+    root, now = str(tmp_path), time.time()
+    _heartbeat(root, 5, now)  # written moments before REAPER quit
+    r = watchdog.check(root, running=False, sweep=False, now=now)
+    assert r["bridge"]["state"] == "stale"
+
+
+def test_launch_waits_for_a_heartbeat_newer_than_the_launch(tmp_path, monkeypatch):
+    root, now = str(tmp_path), time.time()
+    _heartbeat(root, 5, now)  # left over from the REAPER that just closed
+    monkeypatch.setattr(watchdog.time, "sleep", lambda s: None)
+    clock = iter([now + i for i in range(0, 400, 3)])
+    monkeypatch.setattr(watchdog, "_now", lambda: next(clock))
+    state = watchdog._wait_for_heartbeat(root, 10, since=now)
+    assert state["state"] != "connected"

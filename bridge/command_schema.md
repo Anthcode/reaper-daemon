@@ -808,6 +808,17 @@ For get_transcription_source and insert_drum_transcription, see
 > unattended use, set that preference to "in-project MIDI" once, or pre-set the
 > project's MIDI import mode.
 
+### new_project_tab
+```json
+{}
+```
+Opens an empty project tab (REAPER's "New project tab (ignore default template)")
+and makes it active, so following commands write into a fresh project. The
+previous tab is untouched. Refused while the transport is playing
+(`STOP_TRANSPORT`). `NEW_TAB_FAILED` if REAPER opened nothing, `NEW_TAB_NOT_EMPTY`
+if the new tab already has tracks. Result: `tab` (1-based) and `tabs`. Not an
+undoable step; close the tab to discard it.
+
 ### insert_midi_events
 Create a new MIDI item from a list of notes, CC, pitch bend and program changes.
 ```json

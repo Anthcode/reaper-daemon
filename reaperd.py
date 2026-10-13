@@ -22,6 +22,7 @@ Subcommands:
   discover-map  probe a drum track's MIDI note names and propose a kit map
   add-map    save a drum-kit map to the user overlay (JSON or inline roles)
   remove-map remove a user-overlay drum-kit map
+  instrument named instrument library: list, save a track's sound, load it
 
 Run `python3 reaperd.py <subcommand> -h` for per-subcommand options.
 """
@@ -1771,6 +1772,69 @@ def cmd_remove_map(args):
     return 0
 
 
+def _parse_maps(pairs):
+    """['guitar=argent_e', ...] -> {'guitar': 'argent_e'}"""
+    out = {}
+    for pair in pairs or []:
+        kind, sep, name = pair.partition("=")
+        if not sep or not name:
+            raise ValueError(f"--map wants kind=name, got {pair!r}")
+        out[kind.strip()] = name.strip()
+    return out or None
+
+
+def cmd_instrument(args):
+    import instruments as inst
+    br = args.bridge_root
+    try:
+        if args.action == "list":
+            rows = inst.find(inst.load_library(br), role=args.role, tag=args.tag)
+            if args.json:
+                print(json.dumps(rows, indent=1))
+            else:
+                for e in rows:
+                    print(inst.describe(e))
+                if not rows:
+                    print("(no instruments match)")
+            return 0
+        if args.action == "show":
+            lib = inst.load_library(br)
+            if args.name not in lib:
+                raise inst.InstrumentError(f"no instrument named {args.name!r}")
+            print(json.dumps(lib[args.name], indent=1))
+            return 0
+        if args.action == "remove":
+            inst.remove(br, args.name)
+            print(f"[instrument] removed {args.name!r} from your library "
+                  f"(the chain file in REAPER's FXChains folder is kept)")
+            return 0
+        if not status_ok(br, quiet=True):
+            print("error: REAPER bridge is not connected (reaperd.py status)", file=sys.stderr)
+            return 1
+        sender = _bridge_sender(br)
+        if args.action == "save":
+            rng = None
+            if args.range:
+                lo, _, hi = args.range.partition("-")
+                rng = [int(lo), int(hi)]
+            entry, _data = inst.save_from_track(
+                br, sender, args.name, args.track, args.role, library=args.library,
+                maps=_parse_maps(args.map), range_=rng, tags=args.tag or None,
+                notes=args.notes, overwrite=args.overwrite)
+            print(f"[instrument] saved {args.name!r}: {inst.describe(dict(entry, name=args.name))}")
+            return 0
+        if args.action == "load":
+            entry, data = inst.load_onto_track(br, sender, args.name, args.track,
+                                               allow_existing_fx=args.append)
+            print(f"[instrument] loaded {args.name!r} onto {args.track!r}: "
+                  f"{', '.join(data.get('fx') or []) or 'chain spliced'}")
+            return 0
+    except (inst.InstrumentError, ValueError) as e:
+        print(f"error: {e}", file=sys.stderr)
+        return 1
+    return 1
+
+
 # ---------------------------------------------------------------------------
 # argparse
 # ---------------------------------------------------------------------------
@@ -1999,6 +2063,32 @@ def build_parser():
     s = sub.add_parser("remove-map", help="remove a user-overlay drum-kit map")
     s.add_argument("name", help="map name to remove")
     s.set_defaults(func=cmd_remove_map)
+
+    s = sub.add_parser("instrument", help="named instrument library (list/show/save/load/remove)")
+    isub = s.add_subparsers(dest="action", required=True)
+    i = isub.add_parser("list", help="list instruments")
+    i.add_argument("--role")
+    i.add_argument("--tag")
+    i.add_argument("--json", action="store_true")
+    i = isub.add_parser("show", help="print one instrument entry")
+    i.add_argument("name")
+    i = isub.add_parser("save", help="save a track's FX chain as a named instrument")
+    i.add_argument("name", help="lowercase name, e.g. dark-pad")
+    i.add_argument("--track", required=True, help="track that has the sound loaded")
+    i.add_argument("--role", required=True, help="guitar bass drums synth keys orchestral vocal other")
+    i.add_argument("--library", help="what the sound is, e.g. 'Serum 2: PD - Dark Matter'")
+    i.add_argument("--map", action="append", help="note map, kind=name (guitar/bass/drums)")
+    i.add_argument("--range", help="playable MIDI notes, low-high, e.g. 36-96")
+    i.add_argument("--tag", action="append", help="repeatable, e.g. --tag pad --tag dark")
+    i.add_argument("--notes")
+    i.add_argument("--overwrite", action="store_true", help="replace an existing saved chain")
+    i = isub.add_parser("load", help="load a named instrument onto an empty track")
+    i.add_argument("name")
+    i.add_argument("--track", required=True)
+    i.add_argument("--append", action="store_true", help="allow a track that already has FX")
+    i = isub.add_parser("remove", help="remove an instrument from your library")
+    i.add_argument("name")
+    s.set_defaults(func=cmd_instrument)
 
     s = sub.add_parser("recipe", help="capture, compare or rebuild a mix setup")
     s.add_argument("action", choices=("capture", "diff", "rebuild"))

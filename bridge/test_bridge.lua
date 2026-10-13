@@ -2072,4 +2072,23 @@ end)()
   for k,v in pairs(old) do reaper[k]=v end
 end)()
 dofile(join(here,"test_transcription.lua"))(B,ok,eq)
+;(function()
+  local old={}
+  for k,v in pairs(reaper) do old[k]=v end
+  local st={projects={'songA'},active=1,play=0}
+  reaper.GetPlayState=function() return st.play end
+  reaper.EnumProjects=function(i) if i==-1 then return st.projects[st.active] end return st.projects[i+1] end
+  reaper.Main_OnCommand=function(id) eq(id,41929,'opens a tab without the default template')
+    if st.open then st.projects[#st.projects+1]='new'; st.active=#st.projects end end
+  reaper.CountTracks=function() return 0 end
+  st.open=true
+  local r=B.handlers.new_project_tab({payload={}})
+  eq(r.tab,2,'new tab is the second tab'); eq(r.tabs,2,'two tabs open'); eq(st.active,2,'new tab is active')
+  st.open=false
+  eq(pcall(B.handlers.new_project_tab,{payload={}}),false,'no new tab is a failure')
+  st.play=1
+  eq(pcall(B.handlers.new_project_tab,{payload={}}),false,'refused while playing')
+  for k in pairs(reaper) do reaper[k]=old[k] end
+end)()
+
 print(("test_bridge: OK (%d checks)"):format(checks))

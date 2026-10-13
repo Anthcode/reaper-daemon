@@ -30,6 +30,9 @@ gate, because CI does not launch the DAW. See
 | `console_sidecar.py` | Daemon Console broker (headless Claude session) |
 | `setup/install.py` | wires auto-start into REAPER |
 | `watchdog.py` | outside-REAPER supervisor for unattended runs |
+| `instruments.py`, `instruments/` | named instrument library (shipped catalog + this machine's saved sounds) |
+| `songplan.py` | song sheet check, approval and drafting |
+| `skills/song-planner/` | how an agent turns a brief, riff or reference into a sheet |
 | `commands/examples/` | one JSON example per command |
 | `skills/drum-apparatus/` | drum DSL engine and kit-map discovery |
 | `skills/guitar-apparatus/` | guitar and bass riff notation and performance engine |

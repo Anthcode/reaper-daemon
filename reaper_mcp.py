@@ -2102,6 +2102,142 @@ TOOLS.append({"name": "insert_performance_audition", "description": "Insert a re
               "inputSchema": _schema({"target_track_guid": {"type": "string"}, "start_seconds": {"type": "number"}, "pitch": {"type": "integer"}, **DRY_RUN_PROP}, ["target_track_guid"]),
               "handler": tool_insert_performance_audition})
 
+
+def _instrument_sender(kind, payload, **_):
+    return _send(kind, payload, timeout_ms=30000)
+
+
+def tool_instruments(args):
+    """Named instrument library: list/show (read-only), save, load, remove."""
+    import instruments as inst
+    action = args.get("action")
+    try:
+        if action == "list":
+            rows = inst.find(inst.load_library(BRIDGE_ROOT), role=args.get("role"),
+                             tag=args.get("tag"))
+            return _text(json.dumps(rows, indent=1))
+        if action == "show":
+            lib = inst.load_library(BRIDGE_ROOT)
+            if args.get("name") not in lib:
+                return _text(f"no instrument named {args.get('name')!r}", is_error=True)
+            return _text(json.dumps(lib[args["name"]], indent=1))
+        if action == "remove":
+            inst.remove(BRIDGE_ROOT, args.get("name"))
+            return _text(json.dumps({"ok": True, "removed": args.get("name")}))
+        if action not in ("save", "load"):
+            return _text(f"unknown instruments action: {action!r}", is_error=True)
+        for key in ("name", "track"):
+            if not args.get(key):
+                return _text(f"instruments {action} needs '{key}'", is_error=True)
+        if not reaperd.status_ok(bridge_root=BRIDGE_ROOT, quiet=True):
+            return _reaper_down_result("instruments")
+        if action == "save":
+            if not args.get("role"):
+                return _text("instruments save needs 'role'", is_error=True)
+            entry, data = inst.save_from_track(
+                BRIDGE_ROOT, _instrument_sender, args["name"], args["track"], args["role"],
+                library=args.get("library"), maps=args.get("maps"), range_=args.get("range"),
+                articulations=args.get("articulations"), tags=args.get("tags"),
+                notes=args.get("notes"), overwrite=bool(args.get("overwrite")))
+            return _text(json.dumps({"ok": True, "saved": dict(entry, name=args["name"]),
+                                     "chain": data.get("chain")}, indent=1))
+        entry, data = inst.load_onto_track(BRIDGE_ROOT, _instrument_sender, args["name"],
+                                           args["track"],
+                                           allow_existing_fx=bool(args.get("allow_existing_fx")))
+        return _text(json.dumps({"ok": True, "loaded": args["name"], "track": args["track"],
+                                 "fx": data.get("fx"), "maps": entry.get("maps")}, indent=1))
+    except (inst.InstrumentError, ValueError) as exc:
+        return _text(str(exc), is_error=True)
+
+
+TOOLS.append({
+    "name": "instruments",
+    "description": (
+        "Named instrument library, so a sound is picked by name instead of by plugin index. "
+        "list/show: read-only; each entry has role, library, note maps (guitar/bass/drums map "
+        "names the generators use), playable range, tags, and the saved chain name or none. "
+        "save: the user has loaded a sound by hand on 'track' (any Kontakt library or Serum "
+        "preset); this saves that track's FX chain, plugin state included, as "
+        "FXChains/instrument-<name> and registers it. load: splice a saved instrument onto an "
+        "EMPTY track (refused if the track has FX unless allow_existing_fx) and verify the FX "
+        "landed; use the entry's maps when writing notes. remove: drop a user entry (shipped "
+        "catalog entries stay). Errors name the problem; nothing is half-registered."),
+    "inputSchema": _schema({
+        "action": {"type": "string", "enum": ["list", "show", "save", "load", "remove"]},
+        "name": {"type": "string", "description": "lowercase name, e.g. dark-pad"},
+        "track": {"type": "string", "description": "exact track name (save: source, load: destination)"},
+        "role": {"type": "string", "enum": ["guitar", "bass", "drums", "synth", "keys",
+                                            "orchestral", "vocal", "other"]},
+        "tag": {"type": "string", "description": "list: filter by one tag"},
+        "library": {"type": "string", "description": "save: what the sound is, e.g. 'Serum 2: PD - Dark Matter'"},
+        "maps": {"type": "object", "description": "save: {guitar|bass|drums: map name}"},
+        "range": {"type": "array", "items": {"type": "integer"}, "description": "save: [low, high] MIDI notes"},
+        "articulations": {"type": "object", "description": "save: {articulation: keyswitch MIDI note}"},
+        "tags": {"type": "array", "items": {"type": "string"}},
+        "notes": {"type": "string"},
+        "overwrite": {"type": "boolean", "description": "save: replace an existing saved chain"},
+        "allow_existing_fx": {"type": "boolean", "description": "load: append to a track that has FX"},
+    }, required=["action"]),
+    "handler": tool_instruments,
+})
+
+
+def tool_song_plan(args):
+    """Song planner over one sheet file: check/show (read-only), approve, draft."""
+    import songplan as sp
+    action, path = args.get("action"), args.get("sheet")
+    if not path or not isinstance(path, str):
+        return _text("song_plan needs 'sheet' (path to the sheet JSON)", is_error=True)
+    path = os.path.abspath(os.path.expanduser(path))
+    try:
+        sheet = sp.load(path)
+        if action == "show":
+            return _text(sp.render_text(sheet))
+        problems = sp.check(sheet, BRIDGE_ROOT)
+        if action == "check" or problems:
+            return _text(json.dumps({"ok": not problems, "problems": problems,
+                                     "approved": sp.is_approved(sheet)}, indent=1),
+                         is_error=bool(problems))
+        if action == "approve":
+            sp.save(path, sp.approve(sheet))
+            return _text(json.dumps({"ok": True, "approved": path}))
+        if action != "draft":
+            return _text(f"unknown song_plan action: {action!r}", is_error=True)
+        if not sp.is_approved(sheet):
+            return _text(json.dumps({"ok": False, "problems": [
+                "the sheet is not approved (or changed after approval); show it, get a "
+                "yes, then approve it"]}, indent=1), is_error=True)
+        if not reaperd.status_ok(bridge_root=BRIDGE_ROOT, quiet=True):
+            return _reaper_down_result("song_plan")
+        report = sp.draft(sheet, BRIDGE_ROOT, _instrument_sender,
+                          seed=int(args.get("seed") or 101))
+        return _text(json.dumps(report, indent=1), is_error=not report["ok"])
+    except sp.SheetError as exc:
+        return _text(json.dumps({"ok": False, "problems": exc.problems}, indent=1),
+                     is_error=True)
+    except (OSError, ValueError) as exc:
+        return _text(str(exc), is_error=True)
+
+
+TOOLS.append({
+    "name": "song_plan",
+    "description": (
+        "Song planner. A sheet JSON (see docs/song-planner.md and skills/song-planner) "
+        "holds title, tempo, key, parts (instrument-library names) and sections with bars, "
+        "energy, drum lanes, 16-cell riff bars and layer notes. check: every problem at once. "
+        "show: the readable sheet to put in front of the person. approve: ONLY after the "
+        "person explicitly said yes to the whole sheet; any later edit cancels it. draft: "
+        "refuses an unapproved sheet, then opens a NEW project tab and writes tempo, tracks, "
+        "saved sounds, a region per section, drums, both guitars, bass and layers, each step "
+        "reported separately. 4/4 and one tempo per song only. Never saves the project."),
+    "inputSchema": _schema({
+        "action": {"type": "string", "enum": ["check", "show", "approve", "draft"]},
+        "sheet": {"type": "string", "description": "path to the sheet JSON"},
+        "seed": {"type": "integer", "description": "draft: humanizing seed"},
+    }, required=["action", "sheet"]),
+    "handler": tool_song_plan,
+})
+
 def tool_transcribe_drums(args):
     import drum_transcription as transcription
     try:

@@ -4367,6 +4367,9 @@ local NO_UNDO_BLOCK = {
   -- undo point could hold. Its handler carries its own dry_run branch because
   -- membership here bypasses run_command's dry_run short-circuit.
   reload_bridge = true,
+  -- new_project_tab switches the active project, so a block opened on the old
+  -- tab would close on the new one. Opening an empty tab has nothing to undo.
+  new_project_tab = true,
   get_items = true,
   get_transcription_source = true,
   get_render_settings = true,
@@ -4499,6 +4502,33 @@ handlers.set_tempo = command_set_tempo
 handlers.render = command_render
 handlers.save_project = command_save_project
 for _, name in ipairs({"link_fx_midi_cc", "get_midi_inputs", "configure_midi_input", "insert_midi_events", "save_project_as", "get_fx_preset", "set_fx_preset"}) do handlers[name] = fx_chain.performance[name] end
+
+-- Open an empty project tab and make it active, so a draft is written into a
+-- fresh project instead of whatever song is open. The previous tab is left
+-- exactly as it was. REAPER's "New project tab (ignore default template)".
+handlers.new_project_tab = function(command)
+  if reaper.GetPlayState() ~= 0 then
+    error("STOP_TRANSPORT: stop playback before opening a new project tab")
+  end
+  if command.dry_run or (command.payload or {}).dry_run then
+    return { new_tab = true, dry_run = true }
+  end
+  local source = reaper.EnumProjects(-1, "")
+  reaper.Main_OnCommand(41929, 0)
+  local target = reaper.EnumProjects(-1, "")
+  if target == source then error("NEW_TAB_FAILED: REAPER did not open a tab; nothing changed") end
+  if reaper.CountTracks(target) ~= 0 then
+    error("NEW_TAB_NOT_EMPTY: the new tab already has tracks (a default template?)")
+  end
+  local tab, i = nil, 0
+  while true do
+    local proj = reaper.EnumProjects(i, "")
+    if not proj then break end
+    if proj == target then tab = i + 1 end
+    i = i + 1
+  end
+  return { new_tab = true, tab = tab, tabs = i, track_count = 0 }
+end
 handlers.capture_track_audio = command_capture_track_audio
 handlers.get_track_routing = command_get_track_routing
 

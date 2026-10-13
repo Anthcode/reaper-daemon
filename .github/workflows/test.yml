@@ -65,6 +65,8 @@ jobs:
           instrument_inventory.py
           performance_audition.py
           watchdog.py
+          instruments.py
+          songplan.py
           console_sidecar.py
           setup/install.py
           skills/drum-apparatus/groovegen.py

@@ -1,0 +1,49 @@
+{
+ "instruments": {
+  "argent-l": {
+   "role": "guitar",
+   "library": "Shreddage 3.5 Argent (9-string, low C#)",
+   "maps": {"guitar": "argent_e"},
+   "tags": ["rhythm", "left"],
+   "notes": "Hard-left rhythm guitar. Keyswitches live in the guitar map; lowest playable note is 25 (low C#); notes below 25 are articulations, not pitches. Upper limit not yet verified."
+  },
+  "argent-r": {
+   "role": "guitar",
+   "library": "Shreddage 3.5 Argent (9-string, low C#)",
+   "maps": {"guitar": "argent_e"},
+   "tags": ["rhythm", "right"],
+   "notes": "Hard-right rhythm guitar, the double of argent-l."
+  },
+  "nolly-bass": {
+   "role": "bass",
+   "library": "GGD Nolly Bass (Dingwall NG2 6-string)",
+   "maps": {"bass": "nolly_e"},
+   "range": [28, 79],
+   "tags": ["pick"],
+   "notes": "Floor is E0 (28); drop tunings below E take the root an octave up."
+  },
+  "monarch-drums": {
+   "role": "drums",
+   "library": "RS Drums Monarch",
+   "maps": {"drums": "RS Monarch"},
+   "tags": ["metal"]
+  },
+  "odeholm-drums": {
+   "role": "drums",
+   "library": "Odeholm Drums",
+   "maps": {"drums": "Odeholm Default"},
+   "tags": ["metal"]
+  },
+  "sleep-token-drums": {
+   "role": "drums",
+   "library": "Sleep Token II by MixWave",
+   "maps": {"drums": "Sleep Token II by MixWave"}
+  },
+  "uhd-drums": {
+   "role": "drums",
+   "library": "Ultimate Heavy Drums (MDL Tone)",
+   "maps": {"drums": "Ultimate Heavy Drums (MDL Tone)"},
+   "tags": ["metal"]
+  }
+ }
+}
