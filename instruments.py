@@ -45,10 +45,10 @@ def _read(path):
     return data.get("instruments", {})
 
 
-def load_library(bridge_root):
+def load_library(bridge_root, include_user=True):
     """{name: entry} with `source` set to catalog or user."""
     lib = {}
-    for source in ("catalog", "user"):
+    for source in ("catalog", "user") if include_user else ("catalog",):
         for name, entry in _read(os.path.join(_dir(bridge_root), source + ".json")).items():
             lib[name] = dict(entry, name=name, source=source)
     return lib

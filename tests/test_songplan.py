@@ -9,6 +9,14 @@ import songplan as sp
 
 REPO = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
+
+@pytest.fixture(autouse=True)
+def catalog_only(monkeypatch):
+    """Tests see the shipped catalog, never this machine's saved sounds."""
+    real = sp.inst.load_library
+    monkeypatch.setattr(sp.inst, "load_library",
+                        lambda root, include_user=True: real(root, include_user=False))
+
 SHEET = {
     "title": "Test Pattern", "tempo": 140, "key": "E",
     "parts": {"drums": "monarch-drums", "guitar_l": "argent-l", "guitar_r": "argent-r",
@@ -178,3 +186,13 @@ def test_mcp_song_plan_refuses_unapproved_draft_before_touching_reaper(tmp_path,
     out = mcp._TOOL_BY_NAME["song_plan"]["handler"]({"action": "approve", "sheet": str(path)})
     assert not out.get("isError")
     assert sp.is_approved(sp.load(str(path)))
+
+
+def test_draft_warns_about_a_kit_that_needs_its_routing(tmp_path, monkeypatch):
+    lib = sp.inst.load_library(REPO)
+    lib["monarch-drums"] = dict(lib["monarch-drums"], chain="instrument-monarch-drums",
+                                tags=["needs-rig"])
+    monkeypatch.setattr(sp.inst, "load_library", lambda root: lib)
+    rep = sp.draft(sp.approve(sheet()), REPO, fake_sender([]), render=FakeRender(),
+                   out_dir=str(tmp_path))
+    assert any("multi-output routing" in p for p in rep["problems"])

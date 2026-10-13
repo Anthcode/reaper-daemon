@@ -385,6 +385,10 @@ def draft(sheet, bridge_root, sender, *, seed=101, out_dir=None, render=None):
         if entry.get("chain"):
             step(f"load {instrument} on {track}",
                  send("add_fx_chain", {"target_track_name": track, "chain_name": entry["chain"]}))
+            if "needs-rig" in (entry.get("tags") or []):
+                report["problems"].append(
+                    f"{track}: {instrument} only sounds through its multi-output routing, "
+                    "which a saved chain doesn't carry; expect silence until it's routed")
         else:
             report["problems"].append(
                 f"{track}: {instrument} has no saved sound yet; load it by hand on this track "
