@@ -790,6 +790,64 @@ deletes across every track.
 
 ---
 
+## Audio timing
+
+Nudge the timing of recorded audio with native stretch markers, without ever
+rewriting the source file. Read first, plan, then write against that read: the
+writer refuses anything that changed in between. Both are reached through
+`reaperd.py cmd`; there is no MCP tool for them.
+
+### get_audio_timing
+Read-only. Pick the item the way `get_transcription_source` does
+([docs/transcription-protocol.md](../docs/transcription-protocol.md)): `item_guid`,
+or a track selector with an optional zero-based `item_index`, or exactly one
+selected item.
+```json
+{ "target_track_name": "gtr-l", "item_index": 0 }
+```
+Returns the source snapshot (`project_token`, `project_path`, `track_guid`,
+`track_name`, `item_guid`, `take_guid`, `source_file`, `source_type`,
+`position`, `length`, `source_offset`, `playrate`, `pitch`, `scope`) plus
+`stretch_markers` (`position` and `source_position` in seconds, `slope`),
+`preserve_pitch` (1 or 0), `locked` and `global_automation_override`.
+
+Same source rules as `get_transcription_source`, except that existing stretch
+markers are read rather than refused: an audio take at original speed and
+pitch, no take FX or take envelopes, not reversed or a section, at most 600 s,
+not running past the end of its file.
+
+### apply_audio_timing
+```json
+{ "edits": [ { "source": { "...": "the get_audio_timing snapshot for this item" },
+               "markers": [ { "position": 0,     "source_position": 0.8 },
+                            { "position": 1.01,  "source_position": 1.8 },
+                            { "position": 4,     "source_position": 4.8 } ] } ],
+  "validate_only": false }
+```
+Writes stretch markers on 1-100 items in one undo block. `position` is seconds
+from the item start; `source_position` is seconds into the source file. Each
+edit is checked before anything is written:
+
+- `source` must still match the live item on every identity, position, length,
+  offset, playrate and pitch field (`SOURCE_CHANGED: <field>`), one edit per item.
+- The take must have no stretch markers yet (`UNSUPPORTED_SOURCE`); a retry
+  over its own earlier markers is refused, so clear them before redoing a pass.
+- Transport stopped (`TRANSPORT_ACTIVE`), item unlocked (`ITEM_LOCKED`),
+  preserve pitch on (`PITCH_PRESERVATION_REQUIRED`).
+- 2-5000 markers. The first sits at position 0 on the item's source offset and
+  the last at the item's end on `source_offset + length`, so the item's
+  boundaries never move (`BAD_MARKER: fixed item boundary anchors required`).
+- No marker moves audio more than 40 ms (`BAD_MARKER: maximum timing
+  correction is 40ms`), and between neighbors both times increase with a local
+  stretch from 0.75 to 1.333 (`BAD_MARKER: nonmonotonic or excessive local stretch`).
+
+`validate_only: true` runs every check and returns `{validated, items}` without
+writing. Otherwise every marker is read back after insertion; the reply is
+`{verified: true, items: [{item_guid, markers, verified}]}`. On any failure the
+command deletes the markers it added to the items it touched and errors with
+`ROLLED_BACK: <reason>`, or `ROLLBACK_UNCONFIRMED: <reason>` if it couldn't
+confirm the cleanup. One REAPER undo reverts a successful write.
+
 ## MIDI
 
 For get_transcription_source and insert_drum_transcription, see
