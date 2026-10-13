@@ -4372,6 +4372,7 @@ local NO_UNDO_BLOCK = {
   new_project_tab = true,
   get_items = true,
   get_transcription_source = true,
+  get_audio_timing = true,
   get_render_settings = true,
   -- set_render_settings mutates state that lives OUTSIDE the undo history, so
   -- a block would only add an empty undo point. Own dry_run branch, like
@@ -4995,7 +4996,7 @@ do
     if not ok or not value or value == "" then error("SOURCE_ID_UNAVAILABLE: " .. key) end
     return value
   end
-  function T.source(p)
+  function T.source(p,inspect_stretch)
     local track, index, item
     if p.item_guid then
       for ti = 0, reaper.CountTracks(0)-1 do
@@ -5035,7 +5036,7 @@ do
     if not path or path=="" then error("NO_SOURCE_FILE: a local audio file is required") end
     local rate=reaper.GetMediaItemTakeInfo_Value(take,"D_PLAYRATE")
     local pitch=reaper.GetMediaItemTakeInfo_Value(take,"D_PITCH")
-    if rate~=1 or pitch~=0 or reaper.GetTakeNumStretchMarkers(take)>0 or reaper.CountTakeEnvelopes(take)>0 or reaper.TakeFX_GetCount(take)>0 then
+    if rate~=1 or pitch~=0 or (not inspect_stretch and reaper.GetTakeNumStretchMarkers(take)>0) or reaper.CountTakeEnvelopes(take)>0 or reaper.TakeFX_GetCount(take)>0 then
       error("UNSUPPORTED_SOURCE: use an unprocessed take at original speed and pitch")
     end
     local length=reaper.GetMediaItemInfo_Value(item,"D_LENGTH")
@@ -5051,9 +5052,88 @@ do
       track_name=name,item_guid=item_string(item,"GUID"),take_guid=take_guid,source_file=path,
       source_type=kind,position=reaper.GetMediaItemInfo_Value(item,"D_POSITION"),length=length,
       source_offset=offset,playrate=rate,pitch=pitch,
-      scope="Source file before item fades/gain and track FX"}
+      scope="Source file before item fades/gain and track FX"},take,item
   end
   handlers.get_transcription_source=function(command) return T.source(command.payload or {}) end
+  handlers.get_audio_timing=function(command)
+    local p={}
+    for k,v in pairs(command.payload or {}) do p[k]=v end
+    local data,take,item=T.source(p,true)
+    data.stretch_markers={}
+    for i=0,reaper.GetTakeNumStretchMarkers(take)-1 do
+      local _,pos,src=reaper.GetTakeStretchMarker(take,i)
+      data.stretch_markers[#data.stretch_markers+1]={position=pos,source_position=src,slope=reaper.GetTakeStretchMarkerSlope(take,i)}
+    end
+    data.preserve_pitch=reaper.GetMediaItemTakeInfo_Value(take,"B_PPITCH")
+    data.locked=reaper.GetMediaItemInfo_Value(item,"C_LOCK")
+    data.global_automation_override=reaper.GetGlobalAutomationOverride()
+    return data
+  end
+  handlers.apply_audio_timing=function(command)
+    local p=command.payload or {}
+    if reaper.GetPlayState()~=0 then error("TRANSPORT_ACTIVE: stop before editing audio timing") end
+    if type(p.edits)~="table" or #p.edits<1 or #p.edits>100 then error("BAD_PAYLOAD: edits required") end
+    local plan,seen={},{}
+    local function finite(v) return type(v)=="number" and v==v and math.abs(v)<math.huge end
+    for _,edit in ipairs(p.edits) do
+      local expected=edit.source
+      if type(expected)~="table" or type(expected.item_guid)~="string" or seen[expected.item_guid] then error("BAD_PAYLOAD: unique source snapshots required") end
+      seen[expected.item_guid]=true
+      local current,take,item=T.source({item_guid=expected.item_guid})
+      for _,key in ipairs({"project_token","project_path","track_guid","item_guid","take_guid","source_file","source_type","position","length","source_offset","playrate","pitch"}) do
+        local a,b=current[key],expected[key]
+        if (type(a)=="number" and (not finite(b) or math.abs(a-b)>1e-8)) or (type(a)~="number" and a~=b) then error("SOURCE_CHANGED: "..key) end
+      end
+      if reaper.GetMediaItemInfo_Value(item,"C_LOCK")~=0 then error("ITEM_LOCKED: audio timing refused") end
+      if reaper.GetMediaItemTakeInfo_Value(take,"B_PPITCH")~=1 then error("PITCH_PRESERVATION_REQUIRED: enable preserve pitch first") end
+      local markers=edit.markers
+      if type(markers)~="table" or #markers<2 or #markers>5000 then error("BAD_PAYLOAD: bounded marker list required") end
+      local last
+      for _,m in ipairs(markers) do
+        if not finite(m.position) or not finite(m.source_position) or m.position<0 or m.position>current.length+1e-8
+          or math.abs(m.source_position-current.source_offset-m.position)>0.04 then error("BAD_MARKER: maximum timing correction is 40ms") end
+        if last then
+          local dp,ds=m.position-last.position,m.source_position-last.source_position
+          if dp<=0 or ds<=0 or ds/dp<0.75 or ds/dp>1.333334 then error("BAD_MARKER: nonmonotonic or excessive local stretch") end
+        end
+        last=m
+      end
+      if math.abs(markers[1].position)>1e-8 or math.abs(markers[1].source_position-current.source_offset)>1e-8
+        or math.abs(last.position-current.length)>1e-8 or math.abs(last.source_position-current.source_offset-current.length)>1e-8 then error("BAD_MARKER: fixed item boundary anchors required") end
+      plan[#plan+1]={take=take,item=item,markers=markers,item_guid=current.item_guid}
+    end
+    if p.validate_only then return {validated=true,items=#plan} end
+    local touched={}
+    local ok,result=pcall(function()
+      local out={}
+      for _,edit in ipairs(plan) do
+        touched[#touched+1]=edit
+        for _,m in ipairs(edit.markers) do
+          if reaper.SetTakeStretchMarker(edit.take,-1,m.position,m.source_position)<0 then error("VERIFY_FAILED: marker insertion") end
+        end
+        if reaper.GetTakeNumStretchMarkers(edit.take)~=#edit.markers then error("VERIFY_FAILED: marker count") end
+        for i,m in ipairs(edit.markers) do
+          local _,pos,src=reaper.GetTakeStretchMarker(edit.take,i-1)
+          if math.abs(pos-m.position)>1e-8 or math.abs(src-m.source_position)>1e-8 then error("VERIFY_FAILED: marker readback") end
+        end
+        reaper.UpdateItemInProject(edit.item)
+        out[#out+1]={item_guid=edit.item_guid,markers=#edit.markers,verified=true}
+      end
+      reaper.UpdateArrange()
+      return {items=out,verified=true}
+    end)
+    if not ok then
+      local restored=true
+      for _,edit in ipairs(touched) do
+        reaper.DeleteTakeStretchMarkers(edit.take,0,reaper.GetTakeNumStretchMarkers(edit.take))
+        if reaper.GetTakeNumStretchMarkers(edit.take)~=0 then restored=false end
+        reaper.UpdateItemInProject(edit.item)
+      end
+      if not restored then error("ROLLBACK_UNCONFIRMED: "..tostring(result)) end
+      error("ROLLED_BACK: "..tostring(result))
+    end
+    return result
+  end
   handlers.insert_drum_transcription=function(command)
     local p=command.payload or {}
     if reaper.GetPlayState()~=0 then error("TRANSPORT_ACTIVE: stop playback before inserting transcription") end
