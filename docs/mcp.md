@@ -69,6 +69,8 @@ Things the tools tell you, so you do not have to guess:
   total, and reports converged, unconverged, or non-monotone.
 - `analyze_track` and `compare_tracks` hand the model measured mix data:
   LUFS, true peak, spectrum, stereo image, masking table.
+- `compare_to_reference` captures the master once and compares it with a
+  reference WAV at matched loudness. It changes nothing in the project.
 
 ## Safety
 

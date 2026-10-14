@@ -1180,6 +1180,24 @@ def tool_compare_tracks(args):
                            COMPARE_PREAMBLE, note=clamp_note)
 
 
+def tool_compare_to_reference(args):
+    import reference_compare
+    ref = args.get("reference_file")
+    if not ref or not isinstance(ref, str):
+        return _text("compare_to_reference needs 'reference_file' (a WAV path)",
+                     is_error=True)
+    track = args.get("track") or "master"
+    if not isinstance(track, str):
+        return _text("compare_to_reference: 'track' must be a track name",
+                     is_error=True)
+    seconds, clamp_note = clamp_capture_seconds(args.get("seconds"), 10)
+    res = reference_compare.compare_to_reference(
+        _verify_sender, ref, track=track, seconds=seconds,
+        start_seconds=args.get("start_seconds"),
+        reference_start_seconds=args.get("reference_start_seconds"))
+    return _verify_result_text(res, note=clamp_note)
+
+
 def tool_complete_postmortem_onboarding(args):
     track = args.get("track")
     diagnosis = args.get("diagnosis")
@@ -1891,6 +1909,37 @@ TOOLS = [
             "seconds": {"type": "integer", "description": "Capture length per track, default 30."},
         }, required=["tracks"]),
         "handler": tool_compare_tracks,
+    },
+    {
+        "name": "compare_to_reference",
+        "description": ("Compare the mix with a reference track at MATCHED "
+                        "loudness: capture the master (or a named bus) once, "
+                        "measure it and a window of a reference WAV with the "
+                        "same meters (BS.1770 LUFS, Post Mortem spectrum/"
+                        "crest/stereo), gain-match the mix to the reference on "
+                        "paper and return mix-minus-reference deltas per "
+                        "frequency region and 1/3-octave band, crest factor, "
+                        "peak-to-loudness ratio and stereo width. Read-only: "
+                        "one capture render, nothing in the project changes. "
+                        "Park the cursor (or a time selection) on the section "
+                        "to compare; the reference window defaults to its "
+                        "loudest stretch of the same length. Relay the "
+                        "caveats. Needs Post Mortem and allow_audio_writes "
+                        "(see capture_track_audio). Statuses: COMPARED, or "
+                        "REFUSED (tool error, nothing was compared)."),
+        "inputSchema": _schema({
+            "reference_file": {"type": "string",
+                               "description": "Path to the reference WAV (16/24/32-bit PCM or float, mono/stereo)."},
+            "track": {"type": "string",
+                      "description": "Track to capture as the mix side; default 'master'."},
+            "seconds": {"type": "number",
+                        "description": "Capture length 1-60 (default 10)."},
+            "start_seconds": {"type": "number",
+                              "description": "Mix window start in project seconds; default time selection, else edit cursor."},
+            "reference_start_seconds": {"type": "number",
+                                        "description": "Reference window start; default its loudest window."},
+        }, required=["reference_file"]),
+        "handler": tool_compare_to_reference,
     },
     {
         "name": "complete_postmortem_onboarding",

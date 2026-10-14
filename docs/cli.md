@@ -19,6 +19,7 @@ and Linux.
 | `eq <track> "<fx>" <band> <freqHz> <gaindB> [Q]` | set one EQ band |
 | `measure <track> [--seconds N] [--start S] [--json]` | capture and measure one track |
 | `verify <track> [--seconds N] [--json] -- <type> '<payload>'` | mutate with pre/post proof |
+| `reference <file.wav> [--track T] [--seconds N] [--start S] [--ref-start R] [--json]` | compare the mix with a reference at matched loudness |
 | `profile <project.rpp> <track> [--start-bar N] [--bars N] [--max-seconds S]` | analyze a stem for drum planning |
 | `groove <beat.dsl> --track Drums [--position SEC] [--map NAME]` | render a drum DSL to a track |
 | `jam` | drum DSL from stdin to the selected track |
@@ -54,4 +55,5 @@ the same `--start` and `--seconds` to both. Output labels its `metrics_source`
 is reported as such, never as per-track evidence.
 
 Drum, guitar, and verify commands have their own pages:
-[Drums](drums.md), [Guitar and bass](guitar-bass.md), [Verify](verify.md).
+[Drums](drums.md), [Guitar and bass](guitar-bass.md), [Verify](verify.md),
+[Reference](reference.md).
