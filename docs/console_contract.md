@@ -24,9 +24,10 @@ one when the envelope already answers it.
 
 ## REAPER freezes while you measure
 
-`capture_track_audio` and `verify_change` run a synchronous render on REAPER's
-main thread. The whole application stops responding for the length of the
-capture, and `verify_change` is two captures, not one. Measured live: a 9.28
+`capture_track_audio`, `verify_change` and `compare_to_reference` run a
+synchronous render on REAPER's main thread. The whole application stops
+responding for the length of the capture, and `verify_change` is two captures,
+not one. Measured live: a 9.28
 second block cost about 295 missed script ticks.
 
 Say so before you call one:
