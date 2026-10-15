@@ -53,7 +53,7 @@ Tools, grouped:
 | Drum transcription | `transcribe_drums`, `get_drum_transcription`, `insert_drum_transcription` (optional [local runtime](transcription.md)) |
 | Parts | `insert_riff` (one guitar or bass part), `cut_band` (the four-track jam, per-leg results), `humanize_take` (dynamics and micro-timing on an existing take, `--follow-lead` included) |
 | Closed loop | `verify_change` (one mutation with measured pre/post proof, see [Verify](verify.md)), `tune_param` (search a parameter until a measured target like "bass LUFS-I down 3 dB" is hit) |
-| Analysis | `analyze_track`, `compare_tracks` (need [Post Mortem](https://github.com/wretcher207/post-mortem)) |
+| Analysis | `analyze_track`, `compare_tracks`, `compare_to_reference` (mix against a reference WAV, see [Reference](reference.md)) (need [Post Mortem](https://github.com/wretcher207/post-mortem)) |
 
 Install Post Mortem for the analysis tools:
 
@@ -69,6 +69,8 @@ Things the tools tell you, so you do not have to guess:
   total, and reports converged, unconverged, or non-monotone.
 - `analyze_track` and `compare_tracks` hand the model measured mix data:
   LUFS, true peak, spectrum, stereo image, masking table.
+- `compare_to_reference` captures the master once and compares it with a
+  reference WAV at matched loudness. It changes nothing in the project.
 
 ## Safety
 

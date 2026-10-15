@@ -157,8 +157,8 @@ lunch costs pennies. The panel shows "cache cold" and we eat it.
 
 **The freeze clamp.** The sidecar sets `REAPER_DAEMON_CONSOLE_MODE=1` on the
 MCP child, and console captures clamp to 8 seconds across
-`capture_track_audio`, `verify_change`, `tune_param`, `analyze_track`, and
-`compare_tracks` (override:
+`capture_track_audio`, `verify_change`, `tune_param`, `analyze_track`,
+`compare_tracks`, and `compare_to_reference` (override:
 `REAPER_DAEMON_CONSOLE_MAX_CAPTURE_SECONDS`). The clamp is announced to the
 model as `console_note` *inside the JSON body* — the panel decides a result
 is structured by its first character, so a prose preamble would make every

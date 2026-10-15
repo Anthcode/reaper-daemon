@@ -13,6 +13,7 @@ Subcommands:
   status     liveness check via the bridge heartbeat
   measure    capture one track once and print measured audio metrics
   verify     measure -> mutate -> measure: run a command with measured proof
+  reference  compare the mix with a reference WAV at matched loudness
   fxload     resolve an installed plugin name and add it to a track
   setparam   set any plugin parameter to a display value, with verify
   eq         set one EQ band (freq/gain/Q) and confirm it took
@@ -766,6 +767,26 @@ def cmd_verify(args):
     # Default 2, not 1: by this point the mutation may have run, so a result
     # missing exit_code must fail toward "unverified", never "not applied".
     return res.get("exit_code", 2)
+
+
+def cmd_reference(args):
+    import reference_compare
+    res = reference_compare.compare_to_reference(
+        _bridge_sender(args.bridge_root), args.reference, track=args.track,
+        seconds=args.seconds, start_seconds=args.start,
+        reference_start_seconds=args.ref_start)
+    if args.json:
+        _print_json_result(res)
+    elif res.get("ok"):
+        print(reference_compare.format_comparison(res))
+    else:
+        err = res.get("error") or {}
+        print(f"[reference] REFUSED {err.get('code')}: {err.get('details')}",
+              file=sys.stderr)
+        for b in res.get("blockers") or []:
+            print(f"[reference]   blocker {b.get('code')}: {b.get('message')}",
+                  file=sys.stderr)
+    return 0 if res.get("ok") else 1
 
 
 def cmd_fxload(args):
@@ -1909,6 +1930,28 @@ def build_parser():
                    help="-- <type> '<payload-json>' (mirrors `cmd`; options "
                         "work before or after the track name)")
     s.set_defaults(func=cmd_verify)
+
+    s = sub.add_parser(
+        "reference",
+        help="compare the mix with a reference WAV at matched loudness",
+        description="Capture the mix once (default: master) and compare it "
+                    "with a window of a reference WAV after matching "
+                    "integrated loudness: tonal balance per region, crest "
+                    "factor, peak-to-loudness ratio, stereo width. Read-only. "
+                    "Exit 0 COMPARED, 1 REFUSED.")
+    s.add_argument("reference", help="reference WAV path")
+    s.add_argument("--track", default="master",
+                   help="track captured as the mix side (default: master)")
+    s.add_argument("--seconds", type=float, default=None,
+                   help="capture length 1-60 (default 10)")
+    s.add_argument("--start", type=float, default=None,
+                   help="mix window start in seconds (default: time "
+                        "selection, else edit cursor)")
+    s.add_argument("--ref-start", type=float, default=None,
+                   help="reference window start in seconds (default: its "
+                        "loudest window)")
+    s.add_argument("--json", action="store_true", help="print one JSON line")
+    s.set_defaults(func=cmd_reference)
 
     s = sub.add_parser("fxload", help="resolve an installed plugin name and add it")
     s.add_argument("query", help="plugin name query (fuzzy)")

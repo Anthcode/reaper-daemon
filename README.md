@@ -112,6 +112,7 @@ what the measurements do and do not prove.
 | Guitar and bass | `shred` renders a humanized riff, `band` cuts a whole rhythm section |
 | Discovery | `scan_fx` dumps every plugin and parameter; `discover_drum_map` reads any kit's note map |
 | Verify | measure loudness, spectrum and dynamics before and after a mix move |
+| Reference | compare the mix with a reference WAV at matched loudness |
 
 The bridge knows nothing about any specific plugin or drum library. Agents
 discover what a project contains and act on it by name.
@@ -147,6 +148,7 @@ Claude Code session that always knows which track you have selected.
 | [Guitar and bass](docs/guitar-bass.md) | `shred` and `band` |
 | [Mix recipes](docs/mix-recipes.md) | capture, compare and rebuild a mix setup |
 | [Verify](docs/verify.md) | closed-loop mix moves with measured proof |
+| [Reference](docs/reference.md) | the mix against a reference track, loudness-matched |
 | [Protocol](docs/protocol.md) | the file wire format |
 | [Troubleshooting](docs/troubleshooting.md) | silent captures, stale heartbeats |
 | [Watchdog](docs/watchdog.md) | unattended runs: relaunch REAPER, dialogs, stale queue files |
@@ -182,6 +184,7 @@ Three optional pieces do more, and only if you install them:
   Audio stays local.
 - `analyze_track` and `compare_tracks` run
   [Post Mortem](https://github.com/wretcher207/post-mortem) from your PATH.
+  `compare_to_reference` uses its analysis module the same way `verify` does.
 - The Daemon Console starts a Claude Code session on your machine, which
   talks to Anthropic like any Claude Code session.
 
