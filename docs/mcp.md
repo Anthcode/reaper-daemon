@@ -55,11 +55,32 @@ Tools, grouped:
 | Closed loop | `verify_change` (one mutation with measured pre/post proof, see [Verify](verify.md)), `tune_param` (search a parameter until a measured target like "bass LUFS-I down 3 dB" is hit) |
 | Analysis | `analyze_track`, `compare_tracks`, `compare_to_reference` (mix against a reference WAV, see [Reference](reference.md)) (need [Post Mortem](https://github.com/wretcher207/post-mortem)) |
 
-Install Post Mortem for the analysis tools:
+Install Post Mortem for the analysis tools. It is used in two ways, and each
+needs its own install:
+
+- `analyze_track` and `compare_tracks` run the `postmortem` command from your
+  PATH. `pipx` is enough for these.
+- `verify_change`, `tune_param`, `compare_to_reference` and CLI
+  `measure`/`verify` import its analysis module into the Python that runs
+  `reaper_mcp.py` or `reaperd.py`. `pipx` keeps the package in its own
+  environment, so that import fails. Install it into that interpreter too:
 
 ```bash
-pipx install git+https://github.com/wretcher207/post-mortem.git
+pipx install git+https://github.com/wretcher207/post-mortem.git@v0.1.2
+python3 -m pip install --user "git+https://github.com/wretcher207/post-mortem.git@v0.1.2"
 ```
+
+On Windows use `python` instead of `python3`. If your MCP client starts
+`reaper_mcp.py` with a specific interpreter, run that one's `-m pip`. Check
+both:
+
+```bash
+postmortem --help
+python3 -c "from postmortem.analysis import analyze_wav; print('ok')"
+```
+
+Without the module, `measure` and `verify` fall back to LUFS only and label
+the result `metrics_source: render_stats`; `compare_to_reference` refuses.
 
 Things the tools tell you, so you do not have to guess:
 

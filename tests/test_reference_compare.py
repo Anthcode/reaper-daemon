@@ -213,6 +213,20 @@ def test_compare_metrics_matches_loudness_before_comparing():
     assert s["balance_db_delta"] == 0.5
 
 
+def test_compare_metrics_reports_mono_instead_of_a_floor_width():
+    # Post Mortem's dual-mono side channel reads its -120 dB silence floor.
+    mix = {"lufs_i": -16.0, "spectrum_third_octave": [],
+           "stereo": {"correlation": 1.0, "mid_rms_db": -18.0,
+                      "side_rms_db": -120.0, "balance_db": 0.0}}
+    ref = {"lufs_i": -12.0, "spectrum_third_octave": [],
+           "stereo": {"correlation": 0.7, "mid_rms_db": -14.0,
+                      "side_rms_db": -24.0, "balance_db": 0.0}}
+    s = rc.compare_metrics(mix, ref)["stereo"]
+    assert s["mix_is_mono"] is True and "reference_is_mono" not in s
+    assert "width_db_delta" not in s and "mix_width_db" not in s
+    assert s["correlation_delta"] == 0.3
+
+
 def test_compare_metrics_never_fabricates_missing_values():
     mix = {"lufs_i": -16.0, "crest_factor_db": None, "stereo": None,
            "spectrum_third_octave": _spectrum({100: -20.0, 200: float("nan")})}
@@ -357,6 +371,9 @@ def test_refuses_without_post_mortem_before_rendering(reference_wav):
                                   _analyzer_loader=lambda: None)
     assert res["status"] == "REFUSED"
     assert res["error"]["code"] == "POSTMORTEM_MISSING"
+    # the refusal names the interpreter to install into, and why pipx misses
+    assert sys.executable in res["error"]["details"]
+    assert "pipx" in res["error"]["details"]
     assert bridge.commands == []
 
 

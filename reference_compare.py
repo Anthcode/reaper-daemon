@@ -29,6 +29,7 @@ import operator
 import os
 import secrets
 import struct
+import sys
 import tempfile
 from array import array
 from datetime import datetime, timezone
@@ -59,6 +60,11 @@ REGIONS = (
 LOW_ENERGY_BELOW_PEAK_DB = 60.0
 # Region differences smaller than this are not called out as deviations.
 NOTABLE_DELTA_DB = 1.0
+# Post Mortem reports digital silence as -120 dB (SILENCE_FLOOR_DB). A side
+# channel at that floor means the file is mono in stereo clothing: its
+# side-minus-mid "width" is the floor, not a measurement.
+MONO_SIDE_FLOOR_DB = -119.9
+POSTMORTEM_PIP = "git+https://github.com/wretcher207/post-mortem.git@v0.1.2"
 
 STATUS_COMPARED = "COMPARED"
 STATUS_REFUSED = "REFUSED"
@@ -393,7 +399,19 @@ def compare_metrics(mix, ref):
     def width(st):
         side, mid = _fin(st.get("side_rms_db")), _fin(st.get("mid_rms_db"))
         return side - mid if side is not None and mid is not None else None
+
+    def is_mono(st):
+        side = _fin(st.get("side_rms_db"))
+        return side is not None and side <= MONO_SIDE_FLOOR_DB
     a, b = width(ms), width(rs)
+    if is_mono(ms):
+        stereo["mix_is_mono"] = True
+    if is_mono(rs):
+        stereo["reference_is_mono"] = True
+    if is_mono(ms) or is_mono(rs):
+        # A width against the -120 dB floor reads as a huge, meaningless
+        # number; say mono instead and report no width delta.
+        a = b = None
     if a is not None and b is not None:
         # side minus mid, dB: positive delta = the mix is wider.
         stereo["mix_width_db"] = round(a, 2)
@@ -450,8 +468,11 @@ def compare_to_reference(sender, reference_file, track="master",
         return _error("POSTMORTEM_MISSING",
                       "compare_to_reference needs Post Mortem's analysis "
                       "module (spectrum, crest factor, stereo image) and it "
-                      "is not importable. Install Post Mortem (docs/mcp.md); "
-                      "nothing was rendered.")
+                      "is not importable from this Python "
+                      f"({sys.executable}). A pipx install only provides the "
+                      "postmortem command, not the module. Install it into "
+                      f"this interpreter: \"{sys.executable}\" -m pip install "
+                      f"--user \"{POSTMORTEM_PIP}\". Nothing was rendered.")
     if not isinstance(reference_file, str) or not reference_file.strip():
         return _error("BAD_REFERENCE", "reference_file must be a WAV path")
     reference_file = os.path.abspath(os.path.expanduser(reference_file.strip()))
@@ -637,6 +658,10 @@ def format_comparison(res):
                      f" | ref {d['reference_plr_db']:.1f} dB "
                      f"({d['plr_delta_db']:+.1f})")
     s = res.get("stereo") or {}
+    for side in ("mix", "reference"):
+        if s.get(f"{side}_is_mono"):
+            lines.append(f"[reference] {side} is mono (no side signal); "
+                         "no width comparison")
     if "width_db_delta" in s:
         lines.append(f"[reference] width (side-mid) {s['width_db_delta']:+.1f} dB"
                      + (f", correlation {s['correlation_delta']:+.2f}"

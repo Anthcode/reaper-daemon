@@ -62,7 +62,8 @@ Nothing in the project changes. The only side effect is one capture render.
   not depend on gain. A higher number means the mix is less limited than the
   reference.
 - **Width** is side RMS minus mid RMS. A positive delta means the mix is
-  wider.
+  wider. When either side has no side signal at all, the result says it is
+  mono (`mix_is_mono` / `reference_is_mono`) and reports no width delta.
 - `reaper_lufs_i` is REAPER's own figure for the mix capture, included for
   comparison. The match uses the built-in meter on both files.
 
@@ -72,8 +73,10 @@ Nothing in the project changes. The only side effect is one capture render.
   the arrangement, not the mix.
 - WAV only: 16, 24 or 32-bit PCM, or 32/64-bit float, in mono or stereo, up
   to 30 minutes. Convert MP3 or FLAC first.
-- Post Mortem must be installed. Without it the tool refuses before
-  rendering.
+- Post Mortem's analysis module must be importable from the Python that
+  runs the tool. A `pipx` install alone is not enough; see the install steps
+  in [MCP server](mcp.md). Without it the tool refuses before rendering, and
+  the refusal names the exact install command.
 - A silent mix capture or a silent reference window is refused. It is never
   compared.
 - Capture needs `allow_audio_writes`, like `measure` and `verify`.
